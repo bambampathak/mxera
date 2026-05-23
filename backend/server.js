@@ -110,6 +110,15 @@ const transporter = nodemailer.createTransport({
   }
 });
 
+// Helper to validate ObjectId values
+const isValidObjectId = (id) => {
+  try {
+    return mongoose.Types.ObjectId.isValid(String(id));
+  } catch (e) {
+    return false;
+  }
+};
+
 const escapeHtml = (value = '') => String(value)
   .replace(/&/g, '&')
   .replace(/</g, '<')
@@ -301,6 +310,7 @@ app.get('/api/products', async (req, res) => {
 // Get single product
 app.get('/api/products/:id', async (req, res) => {
   try {
+    if (!isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid product id' });
     const product = await Product.findById(req.params.id);
     if (!product) return res.status(404).json({ error: 'Product not found' });
     res.json(product);
@@ -413,6 +423,7 @@ app.put('/api/admin/products/:id', requireAdmin, async (req, res) => {
   if (validationError) return res.status(400).json({ error: validationError });
 
   try {
+    if (!isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid product id' });
     const updated = await Product.findByIdAndUpdate(req.params.id, product, { new: true, runValidators: true });
     if (!updated) return res.status(404).json({ error: 'Product not found' });
     res.json(updated);
@@ -423,6 +434,7 @@ app.put('/api/admin/products/:id', requireAdmin, async (req, res) => {
 
 app.delete('/api/admin/products/:id', requireAdmin, async (req, res) => {
   try {
+    if (!isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid product id' });
     // Check if product is referenced in orders before deleting
     const orderItemCount = await OrderItem.countDocuments({ product_id: req.params.id });
     if (orderItemCount > 0) {
@@ -970,6 +982,7 @@ app.post('/api/cart', optionalAuth, async (req, res) => {
   const userId = req.user?.id || null;
 
   try {
+    if (!isValidObjectId(productId)) return res.status(400).json({ error: 'Invalid product id' });
     const product = await Product.findById(productId);
     if (!product) return res.status(404).json({ error: 'Product not found' });
 
@@ -1128,6 +1141,7 @@ app.post('/api/wishlist', optionalAuth, async (req, res) => {
   const userId = req.user?.id || null;
 
   try {
+    if (!isValidObjectId(productId)) return res.status(400).json({ error: 'Invalid product id' });
     const product = await Product.findById(productId);
     if (!product) return res.status(404).json({ error: 'Product not found' });
 
@@ -1173,6 +1187,7 @@ app.delete('/api/wishlist/:productId', optionalAuth, async (req, res) => {
   const userId = req.user?.id || null;
 
   try {
+    if (!isValidObjectId(req.params.productId)) return res.status(400).json({ error: 'Invalid product id' });
     await Wishlist.findOneAndDelete({
       product_id: req.params.productId,
       $or: [

@@ -349,6 +349,8 @@ function normalizeProduct(p) {
       }
     } catch (e) { p.specifications = null; }
   }
+  // Ensure `id` is available (map MongoDB `_id` to `id`)
+  if (p._id) p.id = String(p._id);
   return p;
 }
 
@@ -412,16 +414,16 @@ function renderProducts(productsToRender) {
     const isInWishlist = wishlist.some(item => item.product_id === product.id);
     const isOutOfStock = product.out_of_stock == 1;
     return `
-      <div class="product-card ${isOutOfStock ? 'out-of-stock' : ''}" data-category="${product.category}" onclick="openProductDetail(${product.id})" style="cursor:pointer;">
+      <div class="product-card ${isOutOfStock ? 'out-of-stock' : ''}" data-category="${product.category}" onclick="openProductDetail(${JSON.stringify(product.id)})" style="cursor:pointer;">
         <div class="product-image">
           <img src="${product.image}" alt="${product.name}" loading="lazy" width="400" height="500">
           ${product.badge ? `<span class="product-badge">${product.badge}</span>` : ''}
           ${isOutOfStock ? '<div class="out-of-stock-overlay"><span>OUT OF STOCK</span></div>' : ''}
           <div class="product-actions" onclick="event.stopPropagation();">
-            <button class="product-action-btn ${isInWishlist ? 'active' : ''}" onclick="toggleWishlist(${product.id})" title="${isInWishlist ? 'Remove from Wishlist' : 'Add to Wishlist'}">
+            <button class="product-action-btn ${isInWishlist ? 'active' : ''}" onclick="toggleWishlist(${JSON.stringify(product.id)})" title="${isInWishlist ? 'Remove from Wishlist' : 'Add to Wishlist'}">
               <svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" ${isInWishlist ? 'fill="currentColor"' : ''}></path></svg>
             </button>
-            <button class="product-action-btn" onclick="quickView(${product.id})" title="Quick View">
+            <button class="product-action-btn" onclick="quickView(${JSON.stringify(product.id)})" title="Quick View">
               <svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
             </button>
           </div>
@@ -439,7 +441,7 @@ function renderProducts(productsToRender) {
               <span class="price">₹${parseInt(product.price).toLocaleString()}</span>
               ${product.original_price ? `<span class="price-original">₹${parseInt(product.original_price).toLocaleString()}</span>` : ''}
             </div>
-            <button class="buy-btn" onclick="event.stopPropagation();${isOutOfStock ? 'showNotification(\'This product is out of stock\')' : 'addToCart(' + product.id + ')'}">${isOutOfStock ? 'OUT OF STOCK' : 'ADD TO CART'}</button>
+            <button class="buy-btn" onclick="event.stopPropagation();${isOutOfStock ? 'showNotification(\'This product is out of stock\')' : 'addToCart(' + JSON.stringify(product.id) + ')'}">${isOutOfStock ? 'OUT OF STOCK' : 'ADD TO CART'}</button>
           </div>
         </div>
       </div>
