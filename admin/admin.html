@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MXERA Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+  <header class="admin-header">
+    <div class="admin-brand">
+      <strong>MXERA</strong>
+      <span>Admin</span>
+    </div>
+    <div class="admin-header-actions">
+      <a href="/">Store</a>
+      <button id="admin-refresh-btn" type="button" title="Refresh admin data">Refresh</button>
+      <button id="admin-logout-btn" type="button">Logout</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="admin-login" id="admin-login">
+      <form id="admin-login-form">
+        <h1>Admin Login</h1>
+        <label>
+          Email
+          <input id="admin-email" type="email" autocomplete="email" required>
+        </label>
+        <label>
+          Password
+          <input id="admin-password" type="password" autocomplete="current-password" required>
+        </label>
+        <button type="submit">Open Dashboard</button>
+        <p id="admin-login-status" role="status"></p>
+      </form>
+    </section>
+
+    <section class="admin-shell" id="admin-shell" hidden>
+      <section class="metric-grid" id="admin-metrics"></section>
+
+      <nav class="admin-tabs" aria-label="Admin views">
+        <button class="admin-tab active" type="button" data-view="products">Products</button>
+        <button class="admin-tab" type="button" data-view="orders">Orders</button>
+        <button class="admin-tab" type="button" data-view="users">Users</button>
+      </nav>
+
+      <section class="admin-view active" id="products-view">
+        <div class="products-layout">
+          <form class="product-form" id="product-form">
+            <div class="panel-head">
+              <h2 id="product-form-title">Add Product</h2>
+              <button id="product-reset-btn" type="button">New</button>
+            </div>
+            <input id="product-id" type="hidden">
+            <label>
+              Name
+              <input id="product-name" required>
+            </label>
+            <div class="field-row">
+              <label>
+                Category
+                <select id="product-category" required>
+                  <option value="clothing">Clothing</option>
+                  <option value="tech">Tech</option>
+                  <option value="gear">Gear</option>
+                </select>
+              </label>
+              <label>
+                Stock
+                <input id="product-stock" type="number" min="0" step="1" required>
+              </label>
+            </div>
+            <div class="field-row">
+              <label>
+                Price
+                <input id="product-price" type="number" min="0" step="0.01" required>
+              </label>
+              <label>
+                Original Price
+                <input id="product-original-price" type="number" min="0" step="0.01">
+              </label>
+            </div>
+            <div class="field-row">
+              <label>
+                Rating
+                <input id="product-rating" type="number" min="0" max="5" step="0.1" value="4.5">
+              </label>
+              <label>
+                Reviews
+                <input id="product-reviews" type="number" min="0" step="1" value="0">
+              </label>
+            </div>
+            <div class="field-row">
+              <label>
+                Tag
+                <input id="product-tag">
+              </label>
+              <label>
+                Badge
+                <input id="product-badge">
+              </label>
+            </div>
+            <div class="field-row">
+              <label>
+                Image URL
+                <input id="product-image" placeholder="https://...">
+              </label>
+              <label class="upload-label">
+                Upload Image
+                <input id="product-image-upload" type="file" accept="image/*">
+                <div class="upload-preview" id="upload-preview"></div>
+              </label>
+            </div>
+            <label class="checkbox-label">
+              <input id="product-out-of-stock" type="checkbox">
+              Out of Stock
+            </label>
+            <label>
+              Description
+              <textarea id="product-description" rows="4"></textarea>
+            </label>
+
+            <!-- Specifications Editor -->
+            <fieldset class="dynamic-fieldset">
+              <legend>Specifications</legend>
+              <div id="specs-container"></div>
+              <button type="button" class="add-row-btn" onclick="addSpecRow()">+ Add Specification</button>
+            </fieldset>
+
+            <!-- Colors & Sizes Editor (for clothing category) -->
+            <fieldset class="dynamic-fieldset" id="clothing-fields">
+              <legend>Colors</legend>
+              <div id="colors-container"></div>
+              <button type="button" class="add-row-btn" onclick="addColorRow()">+ Add Color</button>
+            </fieldset>
+            <fieldset class="dynamic-fieldset" id="sizes-fieldset">
+              <legend>Sizes</legend>
+              <div id="sizes-container"></div>
+              <button type="button" class="add-row-btn" onclick="addSizeRow()">+ Add Size</button>
+            </fieldset>
+
+            <button class="primary-action" type="submit">Save Product</button>
+            <p class="panel-status" id="product-status" role="status"></p>
+          </form>
+
+          <section class="table-panel">
+            <div class="panel-head">
+              <h2>Inventory</h2>
+              <input id="product-filter" type="search" placeholder="Filter products">
+            </div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Category</th>
+                    <th>Price</th>
+                    <th>Stock</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="admin-products-body"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="admin-view" id="orders-view">
+        <section class="table-panel orders-panel">
+          <div class="panel-head">
+            <h2>Orders And Payments</h2>
+            <div class="panel-head-actions">
+              <input id="order-filter" type="search" placeholder="Filter order, email, item">
+              <button id="clear-orders-btn" type="button" class="danger">Clear All Orders</button>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Order</th>
+                  <th>Customer</th>
+                  <th>Items</th>
+                  <th>Total</th>
+                  <th>Payment</th>
+                  <th>Fulfillment</th>
+                </tr>
+              </thead>
+              <tbody id="admin-orders-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section class="admin-view" id="users-view">
+        <section class="table-panel users-panel">
+          <div class="panel-head">
+            <h2>Saved Addresses</h2>
+            <div class="panel-head-actions">
+              <button id="clear-saved-addresses-btn" type="button" class="danger">Clear All Saved Addresses</button>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>User</th>
+                  <th>Label</th>
+                  <th>Address</th>
+                  <th>City</th>
+                  <th>State</th>
+                  <th>Pincode</th>
+                  <th>Phone</th>
+                  <th>Default</th>
+                  <th>Created</th>
+                </tr>
+              </thead>
+              <tbody id="admin-saved-addresses-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </section>
+  </main>
+
+  <div class="admin-toast" id="admin-toast" role="status"></div>
+  <script src="admin.js"></script>
+</body>
+</html>

@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MXERA — Elite Marketplace</title>
+  <meta name="description" content="MXERA delivers elite-grade gear engineered with futuristic design, stealth technology, and uncompromising performance.">
+
+  <!-- Preconnect to critical origins -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://images.unsplash.com">
+
+  <!-- Preload hero image (LCP candidate) — responsive size, matching display dimensions -->
+  <link rel="preload" as="image" href="https://images.unsplash.com/photo-1523398002811-999ca8dec234?q=80&w=800&auto=format&fit=crop" fetchpriority="high">
+
+  <!-- Preload Inter font to minimise FOIT/FOUT -->
+  <link rel="preload" as="font" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=optional" crossorigin>
+
+  <!-- Google Fonts with display=optional to prevent layout shift from font swap -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=optional" rel="stylesheet" media="print" onload="this.media='all'">
+
+  <!-- Critical inline styles for above-the-fold content -->
+  <style>
+    :root{--bg:#060606;--card:#101010;--soft:#181818;--border:rgba(255,255,255,0.08);--text:#ffffff;--muted:#9d9d9d;--gold:#d4af37;--gold-dark:#8f6a11;--shadow:0 10px 40px rgba(0,0,0,.55);--gradient:linear-gradient(135deg,#f3d36b 0%,#d4af37 35%,#8f6a11 100%)}*{margin:0;padding:0;box-sizing:border-box}html{scroll-behavior:smooth;font-size:16px}body{font-family:Inter,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;overflow-x:hidden}.container{width:100%;max-width:1300px;margin:0 auto;padding:0 24px}header{position:fixed;top:0;left:0;right:0;z-index:1000;background:rgba(6,6,6,.85);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);border-bottom:1px solid var(--border)}.navbar{display:flex;align-items:center;justify-content:space-between;height:70px;gap:20px;flex-wrap:wrap}.logo{font-size:24px;font-weight:900;background:var(--gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:-1px}.search-container{flex:1;max-width:420px;position:relative}.search-icon{position:absolute;left:14px;top:50%;transform:translateY(-50%);width:18px;height:18px;stroke:var(--muted);fill:none;stroke-width:2}.search-input{width:100%;padding:10px 16px 10px 42px;border-radius:999px;border:1px solid var(--border);background:var(--soft);color:var(--text);font-size:14px;outline:none;transition:border-color .3s}.nav-links{display:flex;gap:24px}.nav-links a{color:var(--muted);text-decoration:none;font-size:13px;font-weight:600;letter-spacing:1.5px;transition:color .3s}.nav-links a:hover{color:var(--gold)}.nav-actions{display:flex;align-items:center;gap:12px}.cart-btn,.nav-btn{background:none;border:none;color:var(--text);cursor:pointer;position:relative}.hero{padding:140px 0 80px;position:relative;overflow:hidden}.hero-wrapper{display:grid;grid-template-columns:1fr 1fr;gap:60px;align-items:center}.hero-sub{font-size:13px;color:var(--gold);letter-spacing:3px;margin-bottom:16px;font-weight:600}h1{font-size:clamp(36px,6vw,72px);font-weight:900;line-height:1.05;margin-bottom:20px}h1 span{background:var(--gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}@media(max-width:900px){.hero-wrapper{grid-template-columns:1fr}.nav-links{display:none}}
+  </style>
+
+  <!-- Full stylesheet (non-critical, loaded asynchronously, minified) -->
+  <link rel="stylesheet" href="styles.min.css" media="print" onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="styles.min.css"></noscript>
+</head>
+<body>
+
+  <!-- ================= HEADER ================= -->
+
+  <header>
+    <div class="container navbar">
+
+      <div class="logo" aria-label="MXERA home">MXERA</div>
+
+      <!-- Search Bar -->
+      <div class="search-container" role="search">
+        <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="11" cy="11" r="8"></circle>
+          <path d="M21 21l-4.35-4.35"></path>
+        </svg>
+        <input type="text" class="search-input" id="search-input" placeholder="Search products..." aria-label="Search products">
+        <div class="search-results" id="search-results"></div>
+      </div>
+
+      <nav class="nav-links" aria-label="Main navigation">
+        <a href="#products">COLLECTIONS</a>
+        <a href="#about">ABOUT</a>
+        <a href="#contact">CONTACT US</a>
+      </nav>
+
+      <div class="nav-actions">
+
+        <!-- Location Bar -->
+        <button class="location-bar" id="location-bar" aria-label="Select delivery location">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+            <circle cx="12" cy="10" r="3"></circle>
+          </svg>
+          <span>Deliver to</span>
+          <strong>Select Location</strong>
+        </button>
+
+        <!-- Wishlist Button -->
+        <button class="cart-btn" id="open-wishlist" aria-label="Open wishlist">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+          </svg>
+          <span class="cart-count" id="wishlist-count" aria-hidden="true">0</span>
+        </button>
+
+        <!-- Cart Button -->
+        <button class="cart-btn" id="open-cart" aria-label="Open cart">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="9" cy="21" r="1"></circle>
+            <circle cx="20" cy="21" r="1"></circle>
+            <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
+          </svg>
+          <span class="cart-count" id="cart-count" aria-hidden="true">0</span>
+        </button>
+
+        <!-- Login Button -->
+        <button class="nav-btn" id="nav-login-btn" aria-label="Login to your account">LOGIN</button>
+        <button class="cart-btn" id="nav-user-btn" style="display: none;" aria-label="User account menu">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+            <circle cx="12" cy="7" r="4"></circle>
+          </svg>
+          <span id="nav-user-name"></span>
+        </button>
+        <div class="nav-user-menu" id="nav-user-menu" role="menu">
+          <button id="nav-logout-btn" style="display:block;" role="menuitem">LOGOUT</button>
+        </div>
+
+        <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Toggle navigation menu" aria-expanded="false">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+      </div>
+
+    </div>
+  </header>
+
+  <main id="main-content" role="main">
+
+  <!-- ================= HERO ================= -->
+
+  <section class="hero">
+
+    <div class="container hero-wrapper">
+
+      <div>
+
+        <div class="hero-sub">
+          ⚡ NEXT GEN PREMIUM MARKETPLACE
+        </div>
+
+        <h1>
+          FUTURE OF <span>TACTICAL LUXURY</span>
+        </h1>
+
+        <p>
+          MXERA delivers elite-grade gear engineered with futuristic design,
+          stealth technology, and uncompromising performance for creators,
+          riders, and modern hustlers.
+        </p>
+
+        <div class="hero-actions">
+          <a href="#products" class="primary-btn">
+            EXPLORE COLLECTION
+          </a>
+
+          <button class="secondary-btn">
+            WATCH EXPERIENCE
+          </button>
+        </div>
+
+      </div>
+
+      <!-- Hero Visual — LCP element, uses <img> with fetchpriority="high" for fast loading -->
+      <div class="hero-card">
+
+        <img class="hero-image" src="https://images.unsplash.com/photo-1523398002811-999ca8dec234?q=80&w=800&auto=format&fit=crop" alt="MXERA tactical luxury gear showcase" width="800" height="1000" fetchpriority="high">
+
+        <div class="floating-badge">
+          <span>LIMITED DROP</span>
+          <h2>MX-01 SERIES</h2>
+        </div>
+
+        <div class="hero-bottom">
+          <h3>Designed For The New Era</h3>
+          <p>
+            Minimal aesthetics fused with advanced performance architecture.
+          </p>
+        </div>
+
+      </div>
+
+    </div>
+
+  </section>
+
+  <!-- ================= STATS ================= -->
+
+  <section class="stats">
+
+    <div class="container stats-grid">
+
+      <div class="stat-card">
+        <h2>50K+</h2>
+        <p>GLOBAL CUSTOMERS</p>
+      </div>
+
+      <div class="stat-card">
+        <h2>120+</h2>
+        <p>PREMIUM PRODUCTS</p>
+      </div>
+
+      <div class="stat-card">
+        <h2>4.9★</h2>
+        <p>ELITE CUSTOMER RATING</p>
+      </div>
+
+      <div class="stat-card">
+        <h2>24/7</h2>
+        <p>VIP SUPPORT</p>
+      </div>
+
+    </div>
+
+  </section>
+
+  <!-- ================= CATEGORIES ================= -->
+
+  <section class="categories" id="categories">
+
+    <div class="container">
+
+      <div class="section-header">
+
+        <div>
+          <h2>SHOP BY CATEGORY</h2>
+        </div>
+
+        <p>
+          Explore our curated collections designed for every lifestyle.
+        </p>
+
+      </div>
+
+      <div class="category-grid">
+
+        <div class="category-card" role="button" tabindex="0" onclick="filterProducts('clothing'); document.getElementById('products').scrollIntoView({behavior: 'smooth'})" aria-label="Filter by clothing category">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M20.38 3.46L16 2a4 4 0 01-8 0L3.62 3.46a2 2 0 00-1.34 2.23l.58 3.47a1 1 0 00.99.84H6v10c0 1.1.9 2 2 2h8a2 2 0 002-2V10h2.15a1 1 0 00.99-.84l.58-3.47a2 2 0 00-1.34-2.23z"></path>
+          </svg>
+          <h3>CLOTHING</h3>
+          <p>Premium apparel & outerwear</p>
+        </div>
+
+        <div class="category-card" role="button" tabindex="0" onclick="filterProducts('tech'); document.getElementById('products').scrollIntoView({behavior: 'smooth'})" aria-label="Filter by tech category">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+            <line x1="8" y1="21" x2="16" y2="21"></line>
+            <line x1="12" y1="17" x2="12" y2="21"></line>
+          </svg>
+          <h3>TECH</h3>
+          <p>Smart devices & gadgets</p>
+        </div>
+
+        <div class="category-card" role="button" tabindex="0" onclick="filterProducts('gear'); document.getElementById('products').scrollIntoView({behavior: 'smooth'})" aria-label="Filter by gear category">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"></path>
+            <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+            <line x1="12" y1="22.08" x2="12" y2="12"></line>
+          </svg>
+          <h3>GEAR</h3>
+          <p>Tactical accessories</p>
+        </div>
+
+        <div class="category-card" role="button" tabindex="0" aria-label="Filter by bestsellers category">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+          </svg>
+          <h3>BESTSELLERS</h3>
+          <p>Top rated products</p>
+        </div>
+
+      </div>
+
+    </div>
+
+  </section>
+
+  <!-- ================= PRODUCTS ================= -->
+
+  <section class="products" id="products">
+
+    <div class="container">
+
+      <div class="section-header">
+
+        <div>
+          <h2>THE REVOLUTION COLLECTION</h2>
+        </div>
+
+        <p>
+          Built with premium-grade materials and futuristic aesthetics.
+          Every product is crafted to redefine utility, mobility, and status.
+        </p>
+
+      </div>
+
+      <div class="filter-bar">
+        <button class="filter-btn active" onclick="filterProducts('all')">ALL</button>
+        <button class="filter-btn" onclick="filterProducts('clothing')">CLOTHING</button>
+        <button class="filter-btn" onclick="filterProducts('tech')">TECH</button>
+        <button class="filter-btn" onclick="filterProducts('gear')">GEAR</button>
+      </div>
+
+      <div class="product-grid" id="product-grid">
+        <!-- Products rendered by JavaScript -->
+      </div>
+
+    </div>
+
+  </section>
+
+  <!-- ================= ABOUT SECTION ================= -->
+
+  <section class="about" id="about">
+
+    <div class="container">
+
+      <div class="section-header">
+        <div>
+          <h2>ABOUT MXERA</h2>
+        </div>
+        <p>
+          Pioneering the future of tactical luxury since 2020.
+        </p>
+      </div>
+
+      <div class="about-grid">
+
+        <!-- Company Info -->
+        <div class="about-card">
+          <div class="about-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path></svg>
+          </div>
+          <h3>Our Company</h3>
+          <p>MXERA is a next-generation premium marketplace delivering elite tactical fashion, smart technology, and high-performance gear for the modern creator, rider, and hustler. We blend futuristic design with uncompromising quality.</p>
+        </div>
+
+        <!-- Products -->
+        <div class="about-card">
+          <div class="about-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+          </div>
+          <h3>Our Products</h3>
+          <p>From smart tech wearables to tactical apparel and premium accessories. Every product is engineered with cutting-edge materials and designed for those who demand excellence.</p>
+        </div>
+
+        <!-- Reviews -->
+        <div class="about-card">
+          <div class="about-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+          </div>
+          <h3>Reviews</h3>
+          <p>4.9★ average rating from 50,000+ customers worldwide. Real reviews from real users who trust MXERA for their daily drives and creative pursuits.</p>
+        </div>
+
+        <!-- Owner -->
+        <div class="about-card">
+          <div class="about-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+          </div>
+          <h3>Founder</h3>
+          <p>Founded by visionary entrepreneurs with 15+ years in fashion and tech. Our team is passionate about creating gear that empowers the new generation of creators.</p>
+        </div>
+
+        <!-- Shipping -->
+        <div class="about-card">
+          <div class="about-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
+          </div>
+          <h3>Shipping</h3>
+          <p>Free shipping on orders above ₹999. Same-day delivery in metro cities. Express delivery across India within 2-3 business days.</p>
+        </div>
+
+        <!-- Returns -->
+        <div class="about-card">
+          <div class="about-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
+          </div>
+          <h3>Returns & Replacement</h3>
+          <p>30-day hassle-free return policy. Easy replacement for defective products. Customer-first approach with no questions asked returns.</p>
+        </div>
+
+      </div>
+
+      <!-- Delivery Facts -->
+      <div class="delivery-facts">
+        <h3>Delivery Facts</h3>
+        <div class="facts-grid">
+          <div class="fact-item">
+            <span class="fact-number">50K+</span>
+            <span class="fact-label">Happy Customers</span>
+          </div>
+          <div class="fact-item">
+            <span class="fact-number">120+</span>
+            <span class="fact-label">Premium Products</span>
+          </div>
+          <div class="fact-item">
+            <span class="fact-number">24/7</span>
+            <span class="fact-label">VIP Support</span>
+          </div>
+          <div class="fact-item">
+            <span class="fact-number">98%</span>
+            <span class="fact-label">On-Time Delivery</span>
+          </div>
+          <div class="fact-item">
+            <span class="fact-number">15+</span>
+            <span class="fact-label">Cities Delivered</span>
+          </div>
+          <div class="fact-item">
+            <span class="fact-number">4.9★</span>
+            <span class="fact-label">Customer Rating</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </section>
+
+  <!-- ================= CONTACT SECTION ================= -->
+
+  <section class="contact" id="contact">
+
+    <div class="container">
+
+      <div class="section-header">
+        <div>
+          <h2>CONTACT US</h2>
+        </div>
+      </div>
+
+      <div class="contact-grid">
+        <div class="contact-card">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+          <h3>Email</h3>
+          <p>supportmxera@gmail.com</p>
+        </div>
+        <div class="contact-card">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 16.92z"></path></svg>
+          <h3>Phone</h3>
+          <p>+91 8239178258</p>
+        </div>
+        <div class="contact-card" onclick="window.open('https://www.google.com/maps/place/Axis+makeover+%26+cosmetics/@28.7405362,77.1799065,19z/data=!4m15!1m8!3m7!1s0x390d01dd417c5943:0xa56cac78f18cccf1!2sMukundpur,+Delhi!3b1!8m2!3d28.7401139!4d77.1825788!16s%2Fg%2F1tffmqvw!3m5!1s0x390d010026c27a9d:0x73c284b6bf9eec71!8m2!3d28.740836!4d77.1800875!16s%2Fg%2F11x8hy0sdv?entry=ttu&g_ep=EgoyMDI2MDUxMy4wIKXMDSoASAFQAw%3D%3D', '_blank')">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+          <h3>Address</h3>
+          <p>Mukundpur, Delhi, India</p>
+        </div>
+        <div class="contact-card" onclick="window.open('https://www.instagram.com/mxera.official?igsh=dzU1Mmt2ZTNsdGx1', '_blank')">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect><path d="M16 11.37A4 4 0 1112.63 8 4 4 0 0116 11.37z"></path><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line></svg>
+          <h3>Instagram</h3>
+          <p>@mxera.official</p>
+        </div>
+      </div>
+
+    </div>
+
+  </section>
+
+</main>
+
+  <!-- ================= LOCATION MODAL ================= -->
+
+  <div class="location-modal" id="location-modal">
+    <div class="location-modal-content">
+      <h3>Select Delivery Location</h3>
+
+      <div class="location-search">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="11" cy="11" r="8"></circle>
+          <path d="M21 21l-4.35-4.35"></path>
+        </svg>
+        <input type="text" id="location-search-input" placeholder="Search city..." aria-label="Search for a city">
+      </div>
+
+      <div class="location-options" id="location-options"></div>
+
+      <button class="use-location-btn" id="use-location-btn" onclick="useCurrentLocation()">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="10"></circle>
+          <circle cx="12" cy="12" r="3"></circle>
+        </svg>
+        Use My Current Location
+      </button>
+    </div>
+  </div>
+
+  <!-- ================= LOGIN MODAL ================= -->
+
+  <div class="login-overlay" id="login-overlay">
+    <div class="login-modal">
+      <div class="login-header">
+        <h2>Welcome Back</h2>
+        <button class="login-close" id="close-login" aria-label="Close login modal">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 6L6 18M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+
+      <div class="login-tabs">
+        <button class="login-tab active" data-mode="login">LOGIN</button>
+        <button class="login-tab" data-mode="signup">SIGN UP</button>
+      </div>
+
+      <form class="login-form" id="login-form">
+        <div class="form-group" id="login-name-field" style="display: none;">
+          <label>Name</label>
+          <input type="text" id="signup-name-input" placeholder="Enter your name">
+        </div>
+        <div class="form-group" id="signup-gender-field" style="display: none;">
+          <label>Gender</label>
+          <select id="signup-gender">
+            <option value="other">Other</option>
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+          </select>
+        </div>
+        <div class="form-group" id="login-phone-field" style="display: none;">
+          <label>Phone</label>
+          <input type="tel" id="signup-phone-input" placeholder="Enter your phone number">
+        </div>
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="auth-email-input" placeholder="Enter your email" required>
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <div class="password-input-wrapper">
+            <input type="password" id="auth-password-input" placeholder="Enter your password" required>
+            <button type="button" class="toggle-password" onclick="togglePassword('auth-password-input', this)">
+              <svg class="eye-icon" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+              <svg class="eye-off-icon" viewBox="0 0 24 24" style="display:none;"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+            </button>
+          </div>
+        </div>
+        <div class="form-group" id="signup-password-confirm-field" style="display: none;">
+          <label>Confirm Password</label>
+          <div class="password-input-wrapper">
+            <input type="password" id="signup-confirm-password-input" placeholder="Confirm your password">
+            <button type="button" class="toggle-password" onclick="togglePassword('signup-confirm-password-input', this)">
+              <svg class="eye-icon" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+              <svg class="eye-off-icon" viewBox="0 0 24 24" style="display:none;"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+            </button>
+          </div>
+        </div>
+        <div class="form-group" id="signup-otp-section" style="display: none;">
+          <label>Verification Code</label>
+          <input type="text" id="signup-otp-input" placeholder="Enter OTP">
+          <p class="otp-instructions" id="signup-otp-instructions"></p>
+          <button type="button" class="secondary-btn" id="resend-otp-btn">Resend OTP</button>
+        </div>
+        <div class="login-remember" id="login-remember-row">
+          <label>
+            <input type="checkbox"> Remember me
+          </label>
+          <a href="#" id="forgot-password-link">Forgot Password?</a>
+        </div>
+        <button type="submit" class="login-submit">LOGIN</button>
+      </form>
+
+    </div>
+  </div>
+
+  <!-- ================= CART SIDEBAR ================= -->
+
+  <div class="cart-overlay" id="cart-overlay"></div>
+
+  <div class="cart-sidebar" id="cart-sidebar">
+    <div class="cart-header">
+      <h2>YOUR CART</h2>
+      <div class="cart-context" id="cart-context">Guest</div>
+      <button class="close-cart" id="close-cart" aria-label="Close cart">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M18 6L6 18M6 6l12 12"></path>
+        </svg>
+      </button>
+    </div>
+    <div class="cart-items" id="cart-items">
+      <!-- Cart items rendered by JavaScript -->
+    </div>
+    <div class="cart-footer">
+      <div class="cart-subtotal">
+        <span>Subtotal</span>
+        <span id="cart-total">₹0</span>
+      </div>
+      <button class="checkout-btn" id="checkout-btn">PROCEED TO CHECKOUT</button>
+    </div>
+  </div>
+
+  <!-- ================= CHECKOUT MODAL ================= -->
+
+  <div class="checkout-overlay" id="checkout-overlay" onclick="closeCheckout(event)">
+    <div class="checkout-modal" onclick="event.stopPropagation()">
+      <div class="checkout-header">
+        <h2>CHECKOUT</h2>
+        <button class="checkout-close" onclick="closeCheckout()" aria-label="Close checkout">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 6L6 18M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+
+      <form class="checkout-form" id="checkout-form">
+        <div class="checkout-section">
+          <h3>Delivery Address</h3>
+
+          <!-- Saved Addresses Section -->
+          <div id="saved-addresses-section" class="saved-addresses-section" style="display:none;">
+            <label class="saved-addresses-label">USE SAVED ADDRESS</label>
+            <div id="saved-addresses-list" class="saved-addresses-list"></div>
+            <hr style="border:none;border-top:1px solid var(--border);margin:14px 0;">
+          </div>
+
+          <div class="form-group">
+            <label>Full Name</label>
+            <input type="text" id="checkout-name" placeholder="Enter your full name" required>
+          </div>
+          <div class="form-group">
+            <label>Phone Number</label>
+            <input type="tel" id="checkout-phone" placeholder="Enter your phone number" required>
+          </div>
+          <div class="form-group">
+            <label>Email</label>
+            <input type="email" id="checkout-email" placeholder="Enter your email" required>
+          </div>
+          <div class="form-group">
+            <label>House No.</label>
+            <input type="text" id="checkout-house-no" placeholder="House / Flat / Block No." required>
+          </div>
+          <div class="form-group">
+            <label>Street</label>
+            <input type="text" id="checkout-street" placeholder="Street / Road / Area" required>
+          </div>
+          <div class="form-group">
+            <label>Locality</label>
+            <input type="text" id="checkout-locality" placeholder="Locality / Colony / Sector" required>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>City</label>
+              <input type="text" id="checkout-city" placeholder="City" required>
+            </div>
+            <div class="form-group">
+              <label>State</label>
+              <input type="text" id="checkout-state" placeholder="State" required>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>PIN Code</label>
+              <input type="text" id="checkout-pincode" placeholder="PIN Code" required>
+            </div>
+            <div class="form-group">
+              <label>Landmark</label>
+              <input type="text" id="checkout-landmark" placeholder="Landmark (optional)">
+            </div>
+          </div>
+        </div>
+
+        <div class="checkout-section">
+          <h3>Order Summary</h3>
+          <div class="checkout-items" id="checkout-items">
+            <!-- Items will be rendered here -->
+          </div>
+          <div class="checkout-summary">
+            <div class="summary-row">
+              <span>Subtotal</span>
+              <span id="checkout-subtotal">₹0</span>
+            </div>
+            <div class="summary-row">
+              <span>Shipping</span>
+              <span>FREE</span>
+            </div>
+            <div class="summary-row total">
+              <span>Total</span>
+              <span id="checkout-total">₹0</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="checkout-section">
+          <h3>Payment Method</h3>
+          <div class="payment-options">
+            <label class="payment-option">
+              <input type="radio" name="payment" value="cod" checked>
+              <span>Cash on Delivery</span>
+            </label>
+            <label class="payment-option">
+              <input type="radio" name="payment" value="prepaid">
+              <span>Prepaid (Card/UPI)</span>
+            </label>
+          </div>
+        </div>
+
+        <button type="submit" class="place-order-btn" id="place-order-btn">PLACE ORDER</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================= WISHLIST SIDEBAR ================= -->
+
+  <div class="wishlist-overlay" id="wishlist-overlay"></div>
+
+  <div class="wishlist-sidebar" id="wishlist-sidebar">
+    <div class="wishlist-header">
+      <h2>SAVED ITEMS</h2>
+      <div class="wishlist-context" id="wishlist-context">Guest</div>
+      <button class="wishlist-close" id="close-wishlist" aria-label="Close wishlist">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M18 6L6 18M6 6l12 12"></path>
+        </svg>
+      </button>
+    </div>
+    <div class="wishlist-items" id="wishlist-items">
+      <!-- Wishlist items rendered by JavaScript -->
+    </div>
+  </div>
+
+  <!-- ================= PRODUCT DETAIL MODAL ================= -->
+
+  <div class="pdp-overlay" id="pdp-overlay" onclick="closeProductDetail(event)">
+    <div class="pdp-modal" onclick="event.stopPropagation()">
+
+      <button class="pdp-close" onclick="closeProductDetail()" aria-label="Close product details">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"></path></svg>
+      </button>
+
+      <div class="pdp-layout">
+
+        <!-- LEFT — Image Gallery -->
+        <div class="pdp-gallery">
+          <div class="pdp-main-image" id="pdp-main-image">
+            <img id="pdp-main-img" src="" alt="" width="500" height="600">
+          </div>
+          <div class="pdp-thumbnails" id="pdp-thumbnails"></div>
+        </div>
+
+        <!-- RIGHT — Product Info -->
+        <div class="pdp-info">
+
+          <!-- Breadcrumb -->
+          <div class="pdp-breadcrumb" id="pdp-breadcrumb"></div>
+
+          <!-- Title & Rating -->
+          <h1 class="pdp-title" id="pdp-title"></h1>
+          <div class="pdp-rating" id="pdp-rating"></div>
+
+          <!-- Price -->
+          <div class="pdp-price-row" id="pdp-price-row"></div>
+
+          <!-- Description -->
+          <p class="pdp-desc" id="pdp-desc"></p>
+
+          <!-- Color Selector -->
+          <div class="pdp-selector" id="pdp-color-section" style="display:none;">
+            <label>Color: <span id="pdp-color-label"></span></label>
+            <div class="pdp-color-options" id="pdp-color-options"></div>
+          </div>
+
+          <!-- Size Selector -->
+          <div class="pdp-selector" id="pdp-size-section" style="display:none;">
+            <label>Size: <span id="pdp-size-label"></span></label>
+            <div class="pdp-size-options" id="pdp-size-options"></div>
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="pdp-actions">
+            <button class="pdp-add-cart" id="pdp-add-cart" onclick="pdpAddToCart()">ADD TO CART</button>
+            <button class="pdp-wishlist-btn" id="pdp-wishlist-btn" onclick="pdpToggleWishlist()" aria-label="Toggle wishlist">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+              <span>SAVE</span>
+            </button>
+          </div>
+
+          <!-- Delivery Info -->
+          <div class="pdp-delivery">
+            <div class="pdp-delivery-item">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+              <span>Free shipping on orders above ₹999</span>
+            </div>
+            <div class="pdp-delivery-item">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
+              <span>30-Day Easy Returns</span>
+            </div>
+          </div>
+
+          <!-- Specifications Tabs -->
+          <div class="pdp-tabs">
+            <button class="pdp-tab active" data-tab="specs" onclick="switchPdpTab('specs')">SPECIFICATIONS</button>
+            <button class="pdp-tab" data-tab="reviews" onclick="switchPdpTab('reviews')">REVIEWS & RATINGS</button>
+          </div>
+
+          <div class="pdp-tab-content active" id="pdp-specs-content">
+            <table class="pdp-specs-table" id="pdp-specs-table"></table>
+          </div>
+
+          <div class="pdp-tab-content" id="pdp-reviews-content">
+            <div class="pdp-reviews" id="pdp-reviews"></div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= NOTIFICATION ================= -->
+
+  <div class="notification" id="notification" role="status" aria-live="polite">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M22 11.08V12a10 10 0 11-5.93-9.14"></path>
+      <polyline points="22 4 12 14.01 9 11.01"></polyline>
+    </svg>
+    <p>Item added to cart!</p>
+  </div>
+
+  <!-- ================= FOOTER ================= -->
+
+  <footer>
+
+    <div class="container">
+
+      <div class="footer-grid">
+
+        <div class="footer-brand">
+
+          <h2>MXERA</h2>
+
+          <p>
+            Premium future-ready marketplace delivering elite tactical fashion,
+            technology, and gear for the next generation.
+          </p>
+
+        </div>
+
+        <div class="footer-column">
+          <h3>COMPANY</h3>
+          <a href="#">About</a>
+          <a href="#">Vision</a>
+          <a href="#">Careers</a>
+          <a href="#">Press</a>
+        </div>
+
+        <div class="footer-column">
+          <h3>STORE</h3>
+          <a href="#">Collections</a>
+          <a href="#">Technology</a>
+          <a href="#">Accessories</a>
+          <a href="#">Exclusive Drops</a>
+        </div>
+
+        <div class="footer-column">
+          <h3>SUPPORT</h3>
+          <a href="#">Help Center</a>
+          <a href="#">Returns</a>
+          <a href="#">Shipping</a>
+          <a href="#">Contact</a>
+        </div>
+
+      </div>
+
+      <div class="copyright">
+
+        <div>
+          © 2026 MXERA. All rights reserved.
+        </div>
+
+        <div>
+          Crafted for the elite digital generation.
+        </div>
+
+      </div>
+
+    </div>
+
+  </footer>
+
+  <!-- Scripts (minified) -->
+  <script src="script.min.js" defer></script>
+</body>
+</html>
