@@ -93,12 +93,35 @@ app.use(session({
   cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 }
 }));
 
-// MongoDB Connection
+// MongoDB Connection — fail fast instead of buffering queries for 10s
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/mxera';
 
-mongoose.connect(MONGODB_URI)
+mongoose.connect(MONGODB_URI, {
+  bufferCommands: false,   // Fail immediately if not connected
+  serverSelectionTimeoutMS: 5000, // Timeout after 5s if can't connect
+  connectTimeoutMS: 10000
+})
   .then(() => console.log('Connected to MongoDB Atlas'))
   .catch(err => console.error('MongoDB Connection Error:', err.message));
+
+// Track connection state
+let dbConnected = false;
+mongoose.connection.on('connected', () => { dbConnected = true; });
+mongoose.connection.on('disconnected', () => { dbConnected = false; });
+mongoose.connection.on('error', () => { dbConnected = false; });
+
+// Middleware to reject requests when MongoDB is not connected
+const requireDb = (req, res, next) => {
+  if (!dbConnected) {
+    return res.status(503).json({
+      error: 'Database is not connected. Please try again in a moment.',
+      detail: process.env.NODE_ENV === 'development'
+        ? 'Check your MongoDB connection string and network access list in MongoDB Atlas.'
+        : undefined
+    });
+  }
+  next();
+};
 
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST || 'smtp.example.com',
@@ -280,6 +303,9 @@ const mergeSessionToUser = async (sessionId, userId) => {
 };
 
 // ============ API ROUTES ============
+
+// All /api routes require DB connection
+app.use('/api', requireDb);
 
 // Get all products
 app.get('/api/products', async (req, res) => {
@@ -1537,25 +1563,45 @@ app.post('/api/submit-query', async (req, res) => {
   }
 });
 
-// Initialize and Start Server
-const server = app.listen(PORT, async () => {
-  console.log(`MXERA Server running on http://localhost:${PORT}`);
+// Wait for MongoDB connection and then start the server
+async function startServer() {
+  // Wait for connection with a timeout
+  const maxWaitMs = 15000; // 15 seconds total
+  const pollIntervalMs = 500;
+  let waited = 0;
 
-  // Wait for MongoDB connection before initializing
-  mongoose.connection.once('connected', async () => {
-    await initDatabase();
-  });
-
-  // Also try if already connected
-  if (mongoose.connection.readyState === 1) {
-    await initDatabase();
+  while (mongoose.connection.readyState !== 1 && waited < maxWaitMs) {
+    await new Promise(r => setTimeout(r, pollIntervalMs));
+    waited += pollIntervalMs;
   }
-});
 
-server.on('error', (err) => {
-  if (err.code === 'EADDRINUSE') {
-    console.error(`Port ${PORT} is already in use. If you want to use a different port, update PORT in .env or stop the process currently using port ${PORT}.`);
+  if (mongoose.connection.readyState !== 1) {
+    console.error(`Could not connect to MongoDB after ${maxWaitMs / 1000}s.`);
+    console.error('MONGODB_URI:', MONGODB_URI.replace(/\/\/[^:]+:[^@]+@/, '//***:***@'));
+    console.error('Check that:');
+    console.error('  1. Your IP is whitelisted in MongoDB Atlas Network Access');
+    console.error('  2. The connection string in .env is correct');
+    console.error('  3. MongoDB Atlas cluster is running');
     process.exit(1);
   }
-  throw err;
+
+  console.log('MongoDB connected, initialising database…');
+  await initDatabase();
+
+  const server = app.listen(PORT, () => {
+    console.log(`MXERA Server running on http://localhost:${PORT}`);
+  });
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`Port ${PORT} is already in use. If you want to use a different port, update PORT in .env or stop the process currently using port ${PORT}.`);
+      process.exit(1);
+    }
+    throw err;
+  });
+}
+
+startServer().catch(err => {
+  console.error('Failed to start server:', err.message);
+  process.exit(1);
 });

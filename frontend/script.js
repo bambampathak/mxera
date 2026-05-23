@@ -414,16 +414,16 @@ function renderProducts(productsToRender) {
     const isInWishlist = wishlist.some(item => item.product_id === product.id);
     const isOutOfStock = product.out_of_stock == 1;
     return `
-      <div class="product-card ${isOutOfStock ? 'out-of-stock' : ''}" data-category="${product.category}" onclick="openProductDetail(${JSON.stringify(product.id)})" style="cursor:pointer;">
+      <div class="product-card ${isOutOfStock ? 'out-of-stock' : ''}" data-category="${product.category}" onclick='openProductDetail("${product.id}")' style="cursor:pointer;">
         <div class="product-image">
           <img src="${product.image}" alt="${product.name}" loading="lazy" width="400" height="500">
           ${product.badge ? `<span class="product-badge">${product.badge}</span>` : ''}
           ${isOutOfStock ? '<div class="out-of-stock-overlay"><span>OUT OF STOCK</span></div>' : ''}
           <div class="product-actions" onclick="event.stopPropagation();">
-            <button class="product-action-btn ${isInWishlist ? 'active' : ''}" onclick="toggleWishlist(${JSON.stringify(product.id)})" title="${isInWishlist ? 'Remove from Wishlist' : 'Add to Wishlist'}">
+            <button class="product-action-btn ${isInWishlist ? 'active' : ''}" onclick='toggleWishlist("${product.id}")' title="${isInWishlist ? 'Remove from Wishlist' : 'Add to Wishlist'}">
               <svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" ${isInWishlist ? 'fill="currentColor"' : ''}></path></svg>
             </button>
-            <button class="product-action-btn" onclick="quickView(${JSON.stringify(product.id)})" title="Quick View">
+            <button class="product-action-btn" onclick='quickView("${product.id}")' title="Quick View">
               <svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
             </button>
           </div>
@@ -441,7 +441,7 @@ function renderProducts(productsToRender) {
               <span class="price">₹${parseInt(product.price).toLocaleString()}</span>
               ${product.original_price ? `<span class="price-original">₹${parseInt(product.original_price).toLocaleString()}</span>` : ''}
             </div>
-            <button class="buy-btn" onclick="event.stopPropagation();${isOutOfStock ? 'showNotification(\'This product is out of stock\')' : 'addToCart(' + JSON.stringify(product.id) + ')'}">${isOutOfStock ? 'OUT OF STOCK' : 'ADD TO CART'}</button>
+            <button class="buy-btn" onclick='event.stopPropagation();${isOutOfStock ? "showNotification('This product is out of stock')" : 'addToCart(\"' + product.id + '\")'}'>${isOutOfStock ? 'OUT OF STOCK' : 'ADD TO CART'}</button>
           </div>
         </div>
       </div>
@@ -505,16 +505,16 @@ function updateCartUI() {
           ${item.product_size ? `<p class="cart-item-size" style="font-size:12px;color:#888;">Size: ${escaped(item.product_size)}</p>` : ''}
           <p>₹${parseInt(item.price).toLocaleString()}</p>
           <div class="cart-item-qty">
-            <button class="qty-btn" onclick="updateQuantity(${item.id}, -1)">
+            <button class="qty-btn" onclick='updateQuantity("${item.id}", -1)'>
               <svg viewBox="0 0 24 24"><path d="M5 12h14"></path></svg>
             </button>
             <span>${item.quantity}</span>
-            <button class="qty-btn" onclick="updateQuantity(${item.id}, 1)">
+            <button class="qty-btn" onclick='updateQuantity("${item.id}", 1)'>
               <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg>
             </button>
           </div>
         </div>
-        <button class="cart-item-remove" onclick="removeFromCart(${item.id})">
+        <button class="cart-item-remove" onclick='removeFromCart("${item.id}")'>
           <svg viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
         </button>
       </div>
@@ -659,7 +659,7 @@ async function loadSavedAddresses() {
              data-pincode="${escaped(addr.pincode || '')}"
              data-state="${escaped(addr.state || '')}"
              data-landmark="${escaped(addr.landmark || '')}">
-        <input type="radio" name="saved-address" value="${addr.id}" ${addr.is_default ? 'checked' : ''} onchange="fillFromSavedAddress(${addr.id})">
+        <input type="radio" name="saved-address" value="${addr.id}" ${addr.is_default ? 'checked' : ''} onchange='fillFromSavedAddress("${addr.id}")'>
         <div class="saved-address-details">
           <div class="saved-address-label">${escaped(addr.label)} ${addr.is_default ? '<span class="default-badge">DEFAULT</span>' : ''}</div>
           <div class="saved-address-text">${escaped(addr.house_no || addr.address)}${addr.street ? ', ' + escaped(addr.street) : ''}${addr.locality ? ', ' + escaped(addr.locality) : ''}</div>
@@ -883,8 +883,8 @@ function updateWishlistUI() {
           <h3>${item.name}</h3>
           <p>₹${parseInt(item.price).toLocaleString()}</p>
           <div class="wishlist-item-actions">
-            <button class="wishlist-item-btn add-cart" onclick="addToCartFromWishlist(${item.product_id})">ADD TO CART</button>
-            <button class="wishlist-item-btn remove" onclick="toggleWishlist(${item.product_id})">REMOVE</button>
+            <button class="wishlist-item-btn add-cart" onclick='addToCartFromWishlist("${item.product_id}")'>ADD TO CART</button>
+            <button class="wishlist-item-btn remove" onclick='toggleWishlist("${item.product_id}")'>REMOVE</button>
           </div>
         </div>
       </div>
@@ -1381,7 +1381,7 @@ const handleSearch = debounce(function(query) {
   fetchProducts('all', query).then(() => {
     if (products.length > 0) {
       searchResults.innerHTML = products.map(product => `
-        <div class="search-result-item" onclick="viewProduct(${product.id})">
+        <div class="search-result-item" onclick='viewProduct("${product.id}")'>
           <img src="${product.image}" alt="${product.name}" loading="lazy" width="50" height="60">
           <div class="search-result-info">
             <h4>${product.name}</h4>
