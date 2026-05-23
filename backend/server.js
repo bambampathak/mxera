@@ -130,8 +130,22 @@ const transporter = nodemailer.createTransport({
   auth: {
     user: process.env.EMAIL_USER || 'user@example.com',
     pass: process.env.EMAIL_PASS || 'password'
-  }
+  },
+  // Prevent hanging on Render — fail fast if SMTP is unreachable
+  connectionTimeout: 8000,
+  greetingTimeout: 8000,
+  socketTimeout: 10000
 });
+
+// Wrapper that rejects if the email does not send within the timeout
+const sendEmailWithTimeout = (mailOptions, timeoutMs = 12000) => {
+  return Promise.race([
+    transporter.sendMail(mailOptions),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Email send timed out')), timeoutMs)
+    )
+  ]);
+};
 
 // Helper to validate ObjectId values
 const isValidObjectId = (id) => {
@@ -799,6 +813,7 @@ app.post('/api/request-otp', async (req, res) => {
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    // Store OTP first so even if email fails, a retry can succeed
     otpStore[email] = {
       otp,
       expiresAt: Date.now() + 5 * 60 * 1000,
@@ -810,7 +825,7 @@ app.post('/api/request-otp', async (req, res) => {
     const deliveryMethod = method === 'whatsapp' ? 'WhatsApp' : 'Email';
     const mailText = `Hello ${otpStore[email].name},<br><br>Your MXERA signup OTP is <strong>${otp}</strong>.<br>This code will expire in 5 minutes.<br><br>Thank you,<br>MXERA Team`;
 
-    await transporter.sendMail({
+    await sendEmailWithTimeout({
       from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
       to: email,
       subject: 'MXERA Verification Code',
@@ -818,8 +833,9 @@ app.post('/api/request-otp', async (req, res) => {
     });
     res.json({ message: `OTP sent to ${deliveryMethod.toLowerCase()} ${email}`, target: 'email' });
   } catch (error) {
-    console.error('OTP email error:', error);
-    res.status(500).json({ error: `Unable to send OTP email: ${error.message}` });
+    console.error('OTP email error:', error.message);
+    // OTP is already stored — if email fails, tell user to try again
+    res.status(500).json({ error: `Unable to send OTP email: ${error.message}. Please try again.` });
   }
 });
 
@@ -859,7 +875,7 @@ app.post('/api/request-password-reset', async (req, res) => {
     const resetLink = `${clientUrl.replace(/\/$/, '')}/reset.html?token=${token}`;
     const mailText = `Hello ${user.name || 'MXERA User'},<br><br>Click the link below to reset your password (valid for 1 hour):<br><a href="${resetLink}">${resetLink}</a><br><br>If you didn't request this, ignore this email.<br><br>Thanks,<br>MXERA Team`;
 
-    await transporter.sendMail({
+    await sendEmailWithTimeout({
       from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
       to: email,
       subject: 'MXERA Password Reset',
@@ -1411,7 +1427,7 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
     `;
 
     const notificationTasks = [
-      transporter.sendMail({
+      sendEmailWithTimeout({
         from: fromAddress,
         to: customerEmail,
         subject: `MXERA Order Confirmation #${orderId}`,
@@ -1420,7 +1436,7 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
     ];
 
     if (adminEmail) {
-      notificationTasks.push(transporter.sendMail({
+      notificationTasks.push(sendEmailWithTimeout({
         from: fromAddress,
         to: adminEmail,
         replyTo: customerEmail,
@@ -1540,13 +1556,9 @@ app.post('/api/submit-query', async (req, res) => {
     This query was submitted through the contact form.`;
 
   try {
-    console.log('Sending email with config:', {
-      host: process.env.EMAIL_HOST,
-      port: process.env.EMAIL_PORT,
-      user: process.env.EMAIL_USER
-    });
+    console.log('Sending query email to', process.env.EMAIL_USER, 'cc supportmxera@gmail.com');
 
-    await transporter.sendMail({
+    await sendEmailWithTimeout({
       from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
       to: process.env.EMAIL_USER,
       cc: 'supportmxera@gmail.com',

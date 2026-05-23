@@ -355,32 +355,53 @@ function normalizeProduct(p) {
 }
 
 // API Functions
-async function fetchProducts(category = 'all', search = '') {
-  try {
-    const params = new URLSearchParams();
-    if (category !== 'all') params.append('category', category);
-    if (search) params.append('search', search);
+async function fetchProducts(category = 'all', search = '', retries = 2) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const params = new URLSearchParams();
+      if (category !== 'all') params.append('category', category);
+      if (search) params.append('search', search);
 
-    const response = await fetch(`${API_URL}/products?${params}`);
-    if (!response.ok) throw new Error('API error');
-    products = (await response.json()).map(normalizeProduct);
-    renderProducts(products);
-  } catch (error) {
-    console.warn('API unavailable, using sample products:', error);
-    // Filter sample products locally
-    let filtered = [...sampleProducts];
-    if (category !== 'all') {
-      filtered = filtered.filter(p => p.category === category);
+      const response = await fetch(`${API_URL}/products?${params}`);
+      if (response.ok) {
+        products = (await response.json()).map(normalizeProduct);
+        renderProducts(products);
+        return;
+      }
+      // Non-OK response (e.g. 503 DB not ready) — retry after backoff
+      if (attempt < retries) {
+        console.warn(`API returned ${response.status}, retrying (${attempt + 1}/${retries})…`);
+        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+      } else {
+        throw new Error(`API error: ${response.status}`);
+      }
+    } catch (error) {
+      if (attempt < retries) {
+        console.warn(`API call failed (${attempt + 1}/${retries}), retrying…`, error.message);
+        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+      } else {
+        // All retries exhausted — fall back to sample products for display only
+        console.warn('API unavailable after retries, using sample products (display only)');
+        let filtered = [...sampleProducts];
+        if (category !== 'all') {
+          filtered = filtered.filter(p => p.category === category);
+        }
+        if (search) {
+          const q = search.toLowerCase();
+          filtered = filtered.filter(p =>
+            p.name.toLowerCase().includes(q) ||
+            p.description.toLowerCase().includes(q)
+          );
+        }
+        // Use a placeholder string that indicates these are not real DB products.
+        // Cart/wishlist operations on these will fail gracefully with a friendly message.
+        products = filtered.map((p, i) => {
+          const placeholderId = 'sample_' + (i + 1);
+          return { ...p, _id: placeholderId, id: placeholderId };
+        });
+        renderProducts(products);
+      }
     }
-    if (search) {
-      const q = search.toLowerCase();
-      filtered = filtered.filter(p =>
-        p.name.toLowerCase().includes(q) ||
-        p.description.toLowerCase().includes(q)
-      );
-    }
-    products = filtered;
-    renderProducts(products);
   }
 }
 
@@ -451,6 +472,12 @@ function renderProducts(productsToRender) {
 
 // Add to Cart
 async function addToCart(productId, colorName, colorImage, sizeName) {
+  // Guard: detect placeholder sample IDs (API was unavailable, products are display-only)
+  if (typeof productId === 'string' && productId.startsWith('sample_')) {
+    showNotification('Please wait for database connection, then try again');
+    return;
+  }
+
   try {
     const response = await fetch(`${API_URL}/cart`, {
       method: 'POST',
@@ -834,6 +861,12 @@ async function handleCheckoutSubmit(e) {
 
 // Wishlist Functions
 async function toggleWishlist(productId) {
+  // Guard: detect placeholder sample IDs (API was unavailable, products are display-only)
+  if (typeof productId === 'string' && productId.startsWith('sample_')) {
+    showNotification('Please wait for database connection, then try again');
+    return;
+  }
+
   const product = products.find(p => p.id === productId);
   const existing = wishlist.find(item => item.product_id === productId);
 
