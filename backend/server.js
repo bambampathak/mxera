@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const crypto = require('crypto');
-const mysql = require('mysql2');
+const mongoose = require('mongoose');
 const cors = require('cors');
 const compression = require('compression');
 const bcrypt = require('bcryptjs');
@@ -11,6 +11,16 @@ const nodemailer = require('nodemailer');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+
+// Mongoose Models
+const User = require('./models/User');
+const Product = require('./models/Product');
+const Cart = require('./models/Cart');
+const Wishlist = require('./models/Wishlist');
+const Order = require('./models/Order');
+const OrderItem = require('./models/OrderItem');
+const PasswordReset = require('./models/PasswordReset');
+const SavedAddress = require('./models/SavedAddress');
 
 // Multer configuration for file uploads
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -48,7 +58,7 @@ const ADMIN_EMAILS = [
 
 // Middleware
 app.use(cors());
-app.use(compression()); // Enable gzip/brotli compression
+app.use(compression());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -83,16 +93,12 @@ app.use(session({
   cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 }
 }));
 
-// MySQL Connection
-const db = mysql.createConnection({
-  host: process.env.DB_HOST || 'localhost',
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'mxera',
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
-});
+// MongoDB Connection
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/mxera';
+
+mongoose.connect(MONGODB_URI)
+  .then(() => console.log('Connected to MongoDB Atlas'))
+  .catch(err => console.error('MongoDB Connection Error:', err.message));
 
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST || 'smtp.example.com',
@@ -105,10 +111,10 @@ const transporter = nodemailer.createTransport({
 });
 
 const escapeHtml = (value = '') => String(value)
-  .replace(/&/g, '&amp;')
-  .replace(/</g, '&lt;')
-  .replace(/>/g, '&gt;')
-  .replace(/"/g, '&quot;')
+  .replace(/&/g, '&')
+  .replace(/</g, '<')
+  .replace(/>/g, '>')
+  .replace(/"/g, '"')
   .replace(/'/g, '&#39;');
 
 const formatOrderAmount = (value) => `INR ${Number(value || 0).toLocaleString('en-IN', {
@@ -150,379 +156,41 @@ transporter.verify((error, success) => {
 
 const otpStore = {};
 
-db.connect((err) => {
-  if (err) {
-    console.error('MySQL Connection Error:', err.message);
-  } else {
-    console.log('Connected to MySQL Database');
-  }
-});
+// Sample product data
+const sampleProducts = [
+  { name: "Stealth Cooling Jacket", tag: "MXERA PERFORMANCE", description: "Temperature adaptive smart fabric engineered for high-intensity mobility.", price: 4999, original_price: 6999, rating: 4.9, reviews: 234, badge: "HOT", image: "https://images.unsplash.com/photo-1542291026-7eec264c27ff?q=80&w=1600&auto=format&fit=crop", category: "clothing" },
+  { name: "Anti-Loss Tracker Pro", tag: "SMART TECH", description: "Ultra compact encrypted tracking system with real-time sync technology.", price: 1499, original_price: 2499, rating: 4.7, reviews: 156, badge: "NEW", image: "https://images.unsplash.com/photo-1511499767150-a48a237f0083?q=80&w=1600&auto=format&fit=crop", category: "tech" },
+  { name: "Riding Chest Rig X", tag: "TACTICAL SERIES", description: "Lightweight tactical storage platform optimized for urban riders.", price: 2899, original_price: 3999, rating: 4.8, reviews: 89, badge: "LIMITED", image: "https://images.unsplash.com/photo-1523381210434-271e8be1f52b?q=80&w=1600&auto=format&fit=crop", category: "gear" },
+  { name: "Phantom Smart Watch", tag: "Wearable Tech", description: "Advanced biometric monitoring with holographic display interface.", price: 8999, original_price: 12999, rating: 4.9, reviews: 412, badge: "BEST", image: "https://images.unsplash.com/photo-1523275335684-37898b6baf30?q=80&w=1600&auto=format&fit=crop", category: "tech" },
+  { name: "Stealth Runner Pro", tag: "ATHLETIC", description: "Zero-gravity cushioning with adaptive strike technology.", price: 5999, original_price: 8999, rating: 4.8, reviews: 321, badge: "SALE", image: "https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?q=80&w=1600&auto=format&fit=crop", category: "clothing" },
+  { name: "Urban Messenger Bag", tag: "TACTICAL SERIES", description: "Water-resistant modular design with anti-theft protection.", price: 3499, original_price: 4999, rating: 4.6, reviews: 178, badge: null, image: "https://images.unsplash.com/photo-1548036328-c9fa89d128fa?q=80&w=1600&auto=format&fit=crop", category: "gear" },
+  { name: "Quantum Headphones", tag: "AUDIO", description: "Premium noise-cancelling with spatial audio technology.", price: 7999, original_price: 9999, rating: 4.9, reviews: 567, badge: "HOT", image: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?q=80&w=1600&auto=format&fit=crop", category: "tech" },
+  { name: "Titanium Frame Sunglasses", tag: "ACCESSORIES", description: "Ultra-lightweight titanium frames with polarized lenses.", price: 2499, original_price: 3999, rating: 4.7, reviews: 198, badge: "SALE", image: "https://images.unsplash.com/photo-1572635196237-14b3f281503f?q=80&w=1600&auto=format&fit=crop", category: "gear" }
+];
 
-// Initialize Database Tables
-function initDatabase() {
-  const queries = [
-    `CREATE TABLE IF NOT EXISTS users (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      name VARCHAR(100) NOT NULL,
-      email VARCHAR(100) UNIQUE NOT NULL,
-      password VARCHAR(255) NOT NULL,
-      phone VARCHAR(20),
-      gender ENUM('male', 'female', 'other') DEFAULT 'other',
-      address TEXT,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS products (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      name VARCHAR(255) NOT NULL,
-      tag VARCHAR(100),
-      description TEXT,
-      price DECIMAL(10,2) NOT NULL,
-      original_price DECIMAL(10,2),
-      rating DECIMAL(3,2) DEFAULT 4.5,
-      reviews INT DEFAULT 0,
-      badge VARCHAR(50),
-      image VARCHAR(500),
-      category VARCHAR(50),
-      stock INT DEFAULT 100,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS cart (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      user_id INT,
-      session_id VARCHAR(100),
-      product_id INT NOT NULL,
-      quantity INT DEFAULT 1,
-      product_color VARCHAR(100) DEFAULT '',
-      product_color_image VARCHAR(500) DEFAULT '',
-      product_size VARCHAR(50) DEFAULT '',
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (product_id) REFERENCES products(id)
-    )`,
-    `CREATE TABLE IF NOT EXISTS wishlist (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      user_id INT,
-      session_id VARCHAR(100),
-      product_id INT NOT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (product_id) REFERENCES products(id)
-    )`,
-    `CREATE TABLE IF NOT EXISTS password_resets (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      user_id INT NOT NULL,
-      token VARCHAR(255) NOT NULL,
-      expires_at BIGINT NOT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      INDEX (token),
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    )`,
-    `CREATE TABLE IF NOT EXISTS orders (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      user_id INT,
-      idempotency_key VARCHAR(100) UNIQUE,
-      customer_name VARCHAR(150),
-      customer_email VARCHAR(255),
-      customer_phone VARCHAR(30),
-      payment_method VARCHAR(50) DEFAULT 'cod',
-      payment_status VARCHAR(50) DEFAULT 'pending',
-      total_amount DECIMAL(10,2) NOT NULL,
-      status VARCHAR(50) DEFAULT 'pending',
-      delivery_address TEXT,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS order_items (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      order_id INT NOT NULL,
-      product_id INT NOT NULL,
-      quantity INT NOT NULL,
-      price DECIMAL(10,2) NOT NULL,
-      product_color VARCHAR(100) DEFAULT '',
-      product_color_image VARCHAR(500) DEFAULT '',
-      product_size VARCHAR(50) DEFAULT '',
-      FOREIGN KEY (order_id) REFERENCES orders(id),
-      FOREIGN KEY (product_id) REFERENCES products(id)
-    )`,
-    `CREATE TABLE IF NOT EXISTS saved_addresses (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      user_id INT NOT NULL,
-      label VARCHAR(50) DEFAULT 'Home',
-      address TEXT NOT NULL,
-      house_no VARCHAR(100) DEFAULT '',
-      street VARCHAR(255) DEFAULT '',
-      locality VARCHAR(255) DEFAULT '',
-      city VARCHAR(100) DEFAULT '',
-      state VARCHAR(100) DEFAULT '',
-      pincode VARCHAR(20) DEFAULT '',
-      landmark VARCHAR(255) DEFAULT '',
-      phone VARCHAR(20) DEFAULT '',
-      is_default TINYINT DEFAULT 0,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    )`
-  ];
-
-  queries.forEach((query) => {
-    db.query(query, (err) => {
-      if (err) console.error('Table creation error:', err.message);
-    });
-  });
-
-  db.query("SHOW COLUMNS FROM users LIKE 'gender'", (err, results) => {
-    if (err) {
-      console.error('Show columns error:', err.message);
-      return;
-    }
-    if (results.length === 0) {
-      db.query("ALTER TABLE users ADD gender ENUM('male','female','other') DEFAULT 'other'", (alterErr) => {
-        if (alterErr && alterErr.code !== 'ER_DUP_FIELDNAME') {
-          console.error('Add gender column error:', alterErr.message);
-        }
-      });
-    }
-  });
-
-  db.query("SHOW COLUMNS FROM orders LIKE 'idempotency_key'", (err, results) => {
-    if (err) {
-      console.error('Show order columns error:', err.message);
-      return;
-    }
-    if (results.length === 0) {
-      db.query('ALTER TABLE orders ADD idempotency_key VARCHAR(100) UNIQUE AFTER user_id', (alterErr) => {
-        if (alterErr && alterErr.code !== 'ER_DUP_FIELDNAME') {
-          console.error('Add order idempotency column error:', alterErr.message);
-        }
-      });
-    }
-  });
-
-  if (ADMIN_BOOTSTRAP_EMAIL && process.env.ADMIN_BOOTSTRAP_PASSWORD) {
-    const adminName = String(process.env.ADMIN_BOOTSTRAP_NAME || 'MXERA Admin').trim() || 'MXERA Admin';
-    db.query('SELECT id FROM users WHERE email = ? LIMIT 1', [ADMIN_BOOTSTRAP_EMAIL], async (err, results) => {
-      if (err) {
-        console.error('Bootstrap admin lookup error:', err.message);
-        return;
-      }
-      if (results.length > 0) {
-        return;
-      }
-      try {
-        const password = await bcrypt.hash(process.env.ADMIN_BOOTSTRAP_PASSWORD, 10);
-        db.query(
-          'INSERT INTO users (name, email, password, gender) VALUES (?, ?, ?, ?)',
-          [adminName, ADMIN_BOOTSTRAP_EMAIL, password, 'other'],
-          (insertErr) => {
-            if (insertErr && insertErr.code !== 'ER_DUP_ENTRY') {
-              console.error('Bootstrap admin creation error:', insertErr.message);
-              return;
-            }
-            if (!insertErr) {
-              console.log(`Bootstrap admin created for ${ADMIN_BOOTSTRAP_EMAIL}`);
-            }
-          }
-        );
-      } catch (hashError) {
-        console.error('Bootstrap admin password error:', hashError.message);
-      }
-    });
-  }
-
-  const orderColumns = [
-    ['customer_name', 'ALTER TABLE orders ADD customer_name VARCHAR(150) AFTER idempotency_key'],
-    ['customer_email', 'ALTER TABLE orders ADD customer_email VARCHAR(255) AFTER customer_name'],
-    ['customer_phone', 'ALTER TABLE orders ADD customer_phone VARCHAR(30) AFTER customer_email'],
-    ['payment_method', "ALTER TABLE orders ADD payment_method VARCHAR(50) DEFAULT 'cod' AFTER customer_phone"],
-    ['payment_status', "ALTER TABLE orders ADD payment_status VARCHAR(50) DEFAULT 'pending' AFTER payment_method"]
-  ];
-  orderColumns.forEach(([column, query]) => {
-    db.query(`SHOW COLUMNS FROM orders LIKE '${column}'`, (err, results) => {
-      if (err) {
-        console.error(`Show orders ${column} column error:`, err.message);
-        return;
-      }
-      if (results.length === 0) {
-        db.query(query, (alterErr) => {
-          if (alterErr && alterErr.code !== 'ER_DUP_FIELDNAME') {
-            console.error(`Add orders ${column} column error:`, alterErr.message);
-          }
-        });
-      }
-    });
-  });
-
-  // Add new product columns for enhanced features
-  const productColumns = [
-    ['specifications', "ALTER TABLE products ADD specifications TEXT AFTER description"],
-    ['colors', "ALTER TABLE products ADD colors TEXT AFTER image"],
-    ['sizes', "ALTER TABLE products ADD sizes TEXT AFTER colors"],
-    ['out_of_stock', "ALTER TABLE products ADD out_of_stock TINYINT DEFAULT 0 AFTER stock"],
-    ['images', "ALTER TABLE products ADD images TEXT AFTER image"]
-  ];
-  productColumns.forEach(([column, query]) => {
-    db.query(`SHOW COLUMNS FROM products LIKE '${column}'`, (err, results) => {
-      if (err) {
-        console.error(`Show products ${column} column error:`, err.message);
-        return;
-      }
-      if (results.length === 0) {
-        db.query(query, (alterErr) => {
-          if (alterErr && alterErr.code !== 'ER_DUP_FIELDNAME') {
-            console.error(`Add products ${column} column error:`, alterErr.message);
-          }
-        });
-      }
-    });
-  });
-
-  // Add product_name column to order_items (preserves name even if product is later renamed/deleted)
-  db.query("SHOW COLUMNS FROM order_items LIKE 'product_name'", (err, results) => {
-    if (err) {
-      console.error('Show order_items column error:', err.message);
-      return;
-    }
-    if (results.length === 0) {
-      db.query("ALTER TABLE order_items ADD product_name VARCHAR(255) AFTER product_id", (alterErr) => {
-        if (alterErr && alterErr.code !== 'ER_DUP_FIELDNAME') {
-          console.error('Add order_items product_name column error:', alterErr.message);
-        }
-      });
-    }
-  });
-
-  // Add color columns to cart table for existing databases
-  db.query("SHOW COLUMNS FROM cart LIKE 'product_color'", (err, results) => {
-    if (err) {
-      console.error('Show cart product_color column error:', err.message);
-      return;
-    }
-    if (results.length === 0) {
-      db.query("ALTER TABLE cart ADD product_color VARCHAR(100) DEFAULT '' AFTER quantity", (alterErr) => {
-        if (alterErr && alterErr.code !== 'ER_DUP_FIELDNAME') {
-          console.error('Add cart product_color column error:', alterErr.message);
-        }
-      });
-      db.query("ALTER TABLE cart ADD product_color_image VARCHAR(500) DEFAULT '' AFTER product_color", (alterErr) => {
-        if (alterErr && alterErr.code !== 'ER_DUP_FIELDNAME') {
-          console.error('Add cart product_color_image column error:', alterErr.message);
-        }
-      });
-    }
-  });
-
-  // Add color columns to order_items table for existing databases
-  db.query("SHOW COLUMNS FROM order_items LIKE 'product_color'", (err, results) => {
-    if (err) {
-      console.error('Show order_items product_color column error:', err.message);
-      return;
-    }
-    if (results.length === 0) {
-      db.query("ALTER TABLE order_items ADD product_color VARCHAR(100) DEFAULT '' AFTER price", (alterErr) => {
-        if (alterErr && alterErr.code !== 'ER_DUP_FIELDNAME') {
-          console.error('Add order_items product_color column error:', alterErr.message);
-        }
-      });
-      db.query("ALTER TABLE order_items ADD product_color_image VARCHAR(500) DEFAULT '' AFTER product_color", (alterErr) => {
-        if (alterErr && alterErr.code !== 'ER_DUP_FIELDNAME') {
-          console.error('Add order_items product_color_image column error:', alterErr.message);
-        }
-      });
-    }
-  });
-
-  // Add product_size column to cart table for existing databases
-  db.query("SHOW COLUMNS FROM cart LIKE 'product_size'", (err, results) => {
-    if (err) {
-      console.error('Show cart product_size column error:', err.message);
-      return;
-    }
-    if (results.length === 0) {
-      db.query("ALTER TABLE cart ADD product_size VARCHAR(50) DEFAULT '' AFTER product_color_image", (alterErr) => {
-        if (alterErr && alterErr.code !== 'ER_DUP_FIELDNAME') {
-          console.error('Add cart product_size column error:', alterErr.message);
-        }
-      });
-    }
-  });
-
-  // Add product_size column to order_items table for existing databases
-  db.query("SHOW COLUMNS FROM order_items LIKE 'product_size'", (err, results) => {
-    if (err) {
-      console.error('Show order_items product_size column error:', err.message);
-      return;
-    }
-    if (results.length === 0) {
-      db.query("ALTER TABLE order_items ADD product_size VARCHAR(50) DEFAULT '' AFTER product_color_image", (alterErr) => {
-        if (alterErr && alterErr.code !== 'ER_DUP_FIELDNAME') {
-          console.error('Add order_items product_size column error:', alterErr.message);
-        }
-      });
-    }
-  });
-
-  // Add name, email, state columns, house_no, street, locality, landmark to saved_addresses
-  const savedAddressColumns = [
-    ['customer_name', "ALTER TABLE saved_addresses ADD customer_name VARCHAR(150) DEFAULT '' AFTER label"],
-    ['customer_email', "ALTER TABLE saved_addresses ADD customer_email VARCHAR(255) DEFAULT '' AFTER customer_name"],
-    ['state', "ALTER TABLE saved_addresses ADD state VARCHAR(100) DEFAULT '' AFTER city"],
-    ['house_no', "ALTER TABLE saved_addresses ADD house_no VARCHAR(100) DEFAULT '' AFTER address"],
-    ['street', "ALTER TABLE saved_addresses ADD street VARCHAR(255) DEFAULT '' AFTER house_no"],
-    ['locality', "ALTER TABLE saved_addresses ADD locality VARCHAR(255) DEFAULT '' AFTER street"],
-    ['landmark', "ALTER TABLE saved_addresses ADD landmark VARCHAR(255) DEFAULT '' AFTER pincode"]
-  ];
-  savedAddressColumns.forEach(([column, query]) => {
-    db.query(`SHOW COLUMNS FROM saved_addresses LIKE '${column}'`, (err, results) => {
-      if (err) {
-        console.error(`Show saved_addresses ${column} column error:`, err.message);
-        return;
-      }
-      if (results.length === 0) {
-        db.query(query, (alterErr) => {
-          if (alterErr && alterErr.code !== 'ER_DUP_FIELDNAME') {
-            console.error(`Add saved_addresses ${column} column error:`, alterErr.message);
-          }
-        });
-      }
-    });
-  });
-
-  // Add UNIQUE constraint on (user_id, address, city, pincode) to prevent duplicate saved addresses
-  db.query("SHOW INDEX FROM saved_addresses WHERE Column_name = 'address' AND Key_name = 'uq_user_address'", (err, results) => {
-    if (err) {
-      console.error('Check saved_addresses index error:', err.message);
-      return;
-    }
-    if (results.length === 0) {
-      db.query("ALTER IGNORE TABLE saved_addresses ADD UNIQUE INDEX uq_user_address (user_id, address(255), city, pincode)", (idxErr) => {
-        if (idxErr && idxErr.code !== 'ER_DUP_KEYNAME') {
-          // ALTER IGNORE may not work in strict MySQL 8+; try a different approach
-          db.query("CREATE UNIQUE INDEX uq_user_address ON saved_addresses (user_id, address(255), city, pincode)", (createErr) => {
-            if (createErr && createErr.code !== 'ER_DUP_KEYNAME') {
-              console.error('Add saved_addresses UNIQUE index error:', createErr.message);
-            }
-          });
-        }
-      });
-    }
-  });
-
-  // Insert sample products if not exist
-  db.query('SELECT COUNT(*) as count FROM products', (err, result) => {
-    if (result[0].count === 0) {
-      const sampleProducts = [
-        { name: "Stealth Cooling Jacket", tag: "MXERA PERFORMANCE", description: "Temperature adaptive smart fabric engineered for high-intensity mobility.", price: 4999, original_price: 6999, rating: 4.9, reviews: 234, badge: "HOT", image: "https://images.unsplash.com/photo-1542291026-7eec264c27ff?q=80&w=1600&auto=format&fit=crop", category: "clothing" },
-        { name: "Anti-Loss Tracker Pro", tag: "SMART TECH", description: "Ultra compact encrypted tracking system with real-time sync technology.", price: 1499, original_price: 2499, rating: 4.7, reviews: 156, badge: "NEW", image: "https://images.unsplash.com/photo-1511499767150-a48a237f0083?q=80&w=1600&auto=format&fit=crop", category: "tech" },
-        { name: "Riding Chest Rig X", tag: "TACTICAL SERIES", description: "Lightweight tactical storage platform optimized for urban riders.", price: 2899, original_price: 3999, rating: 4.8, reviews: 89, badge: "LIMITED", image: "https://images.unsplash.com/photo-1523381210434-271e8be1f52b?q=80&w=1600&auto=format&fit=crop", category: "gear" },
-        { name: "Phantom Smart Watch", tag: "Wearable Tech", description: "Advanced biometric monitoring with holographic display interface.", price: 8999, original_price: 12999, rating: 4.9, reviews: 412, badge: "BEST", image: "https://images.unsplash.com/photo-1523275335684-37898b6baf30?q=80&w=1600&auto=format&fit=crop", category: "tech" },
-        { name: "Stealth Runner Pro", tag: "ATHLETIC", description: "Zero-gravity cushioning with adaptive strike technology.", price: 5999, original_price: 8999, rating: 4.8, reviews: 321, badge: "SALE", image: "https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?q=80&w=1600&auto=format&fit=crop", category: "clothing" },
-        { name: "Urban Messenger Bag", tag: "TACTICAL SERIES", description: "Water-resistant modular design with anti-theft protection.", price: 3499, original_price: 4999, rating: 4.6, reviews: 178, badge: null, image: "https://images.unsplash.com/photo-1548036328-c9fa89d128fa?q=80&w=1600&auto=format&fit=crop", category: "gear" },
-        { name: "Quantum Headphones", tag: "AUDIO", description: "Premium noise-cancelling with spatial audio technology.", price: 7999, original_price: 9999, rating: 4.9, reviews: 567, badge: "HOT", image: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?q=80&w=1600&auto=format&fit=crop", category: "tech" },
-        { name: "Titanium Frame Sunglasses", tag: "ACCESSORIES", description: "Ultra-lightweight titanium frames with polarized lenses.", price: 2499, original_price: 3999, rating: 4.7, reviews: 198, badge: "SALE", image: "https://images.unsplash.com/photo-1572635196237-14b3f281503f?q=80&w=1600&auto=format&fit=crop", category: "gear" }
-      ];
-
-      sampleProducts.forEach(product => {
-        db.query('INSERT INTO products SET ?', product);
-      });
+// Initialize Database — seed sample products and bootstrap admin
+async function initDatabase() {
+  try {
+    // Seed sample products if the collection is empty
+    const productCount = await Product.countDocuments();
+    if (productCount === 0) {
+      await Product.insertMany(sampleProducts);
       console.log('Sample products inserted');
     }
-  });
+
+    // Bootstrap admin user
+    if (ADMIN_BOOTSTRAP_EMAIL && process.env.ADMIN_BOOTSTRAP_PASSWORD) {
+      const existingAdmin = await User.findOne({ email: ADMIN_BOOTSTRAP_EMAIL });
+      if (!existingAdmin) {
+        const adminName = String(process.env.ADMIN_BOOTSTRAP_NAME || 'MXERA Admin').trim() || 'MXERA Admin';
+        const hashedPassword = await bcrypt.hash(process.env.ADMIN_BOOTSTRAP_PASSWORD, 10);
+        await User.create({ name: adminName, email: ADMIN_BOOTSTRAP_EMAIL, password: hashedPassword, gender: 'other' });
+        console.log(`Bootstrap admin created for ${ADMIN_BOOTSTRAP_EMAIL}`);
+      }
+    }
+  } catch (err) {
+    console.error('Database initialization error:', err.message);
+  }
 }
 
 // Auth Middleware
@@ -558,112 +226,87 @@ const requireAdmin = (req, res, next) => authenticateToken(req, res, () => {
   next();
 });
 
-const mergeSessionCartToUser = (sessionId, userId, callback) => {
-  if (!sessionId || !userId) return callback();
+const mergeSessionCartToUser = async (sessionId, userId) => {
+  if (!sessionId || !userId) return;
 
-  db.query('SELECT id, product_id, quantity, product_color, product_size FROM cart WHERE session_id = ? AND user_id IS NULL', [sessionId], (err, rows) => {
-    if (err) return callback(err);
-    let remaining = rows.length;
-    if (remaining === 0) return callback();
-
-    rows.forEach(row => {
-      // Match by product_id AND product_color AND product_size so different colors/sizes stay separate
-      db.query('SELECT id, quantity FROM cart WHERE user_id = ? AND product_id = ? AND product_color = ? AND product_size = ?', [userId, row.product_id, row.product_color || '', row.product_size || ''], (err, existing) => {
-        if (err) return callback(err);
-
-        if (existing.length > 0) {
-          const newQty = existing[0].quantity + row.quantity;
-          db.query('UPDATE cart SET quantity = ? WHERE id = ?', [newQty, existing[0].id], (err) => {
-            if (err) return callback(err);
-            db.query('DELETE FROM cart WHERE id = ?', [row.id], (err) => {
-              if (err) return callback(err);
-              remaining -= 1;
-              if (remaining === 0) callback();
-            });
-          });
-        } else {
-          db.query('UPDATE cart SET user_id = ? WHERE id = ?', [userId, row.id], (err) => {
-            if (err) return callback(err);
-            remaining -= 1;
-            if (remaining === 0) callback();
-          });
-        }
-      });
+  const sessionCartItems = await Cart.find({ session_id: sessionId, user_id: null });
+  for (const item of sessionCartItems) {
+    const existing = await Cart.findOne({
+      user_id: userId,
+      product_id: item.product_id,
+      product_color: item.product_color || '',
+      product_size: item.product_size || ''
     });
-  });
+    if (existing) {
+      existing.quantity += item.quantity;
+      await existing.save();
+      await Cart.deleteOne({ _id: item._id });
+    } else {
+      item.user_id = userId;
+      item.session_id = undefined;
+      await item.save();
+    }
+  }
 };
 
-const mergeSessionWishlistToUser = (sessionId, userId, callback) => {
-  if (!sessionId || !userId) return callback();
+const mergeSessionWishlistToUser = async (sessionId, userId) => {
+  if (!sessionId || !userId) return;
 
-  db.query('SELECT id, product_id FROM wishlist WHERE session_id = ? AND user_id IS NULL', [sessionId], (err, rows) => {
-    if (err) return callback(err);
-    let remaining = rows.length;
-    if (remaining === 0) return callback();
-
-    rows.forEach(row => {
-      db.query('SELECT id FROM wishlist WHERE user_id = ? AND product_id = ?', [userId, row.product_id], (err, existing) => {
-        if (err) return callback(err);
-
-        if (existing.length > 0) {
-          db.query('DELETE FROM wishlist WHERE id = ?', [row.id], (err) => {
-            if (err) return callback(err);
-            remaining -= 1;
-            if (remaining === 0) callback();
-          });
-        } else {
-          db.query('UPDATE wishlist SET user_id = ? WHERE id = ?', [userId, row.id], (err) => {
-            if (err) return callback(err);
-            remaining -= 1;
-            if (remaining === 0) callback();
-          });
-        }
-      });
-    });
-  });
+  const sessionWishlistItems = await Wishlist.find({ session_id: sessionId, user_id: null });
+  for (const item of sessionWishlistItems) {
+    const existing = await Wishlist.findOne({ user_id: userId, product_id: item.product_id });
+    if (existing) {
+      await Wishlist.deleteOne({ _id: item._id });
+    } else {
+      item.user_id = userId;
+      item.session_id = undefined;
+      await item.save();
+    }
+  }
 };
 
-const mergeSessionToUser = (sessionId, userId, callback) => {
-  mergeSessionCartToUser(sessionId, userId, (err) => {
-    if (err) return callback(err);
-    mergeSessionWishlistToUser(sessionId, userId, callback);
-  });
+const mergeSessionToUser = async (sessionId, userId) => {
+  await mergeSessionCartToUser(sessionId, userId);
+  await mergeSessionWishlistToUser(sessionId, userId);
 };
 
 // ============ API ROUTES ============
 
 // Get all products
-app.get('/api/products', (req, res) => {
-  const { category, search } = req.query;
-  let query = 'SELECT * FROM products WHERE 1=1';
-  const params = [];
+app.get('/api/products', async (req, res) => {
+  try {
+    const { category, search } = req.query;
+    const filter = {};
 
-  if (category && category !== 'all') {
-    query += ' AND category = ?';
-    params.push(category);
+    if (category && category !== 'all') {
+      filter.category = category;
+    }
+
+    if (search) {
+      const regex = new RegExp(search, 'i');
+      filter.$or = [
+        { name: regex },
+        { tag: regex },
+        { description: regex }
+      ];
+    }
+
+    const products = await Product.find(filter).sort({ created_at: -1 });
+    res.json(products);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
-
-  if (search) {
-    query += ' AND (name LIKE ? OR tag LIKE ? OR description LIKE ?)';
-    const searchTerm = `%${search}%`;
-    params.push(searchTerm, searchTerm, searchTerm);
-  }
-
-  query += ' ORDER BY created_at DESC';
-
-  db.query(query, params, (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
-  });
 });
 
 // Get single product
-app.get('/api/products/:id', (req, res) => {
-  db.query('SELECT * FROM products WHERE id = ?', [req.params.id], (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (results.length === 0) return res.status(404).json({ error: 'Product not found' });
-    res.json(results[0]);
-  });
+app.get('/api/products/:id', async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.id);
+    if (!product) return res.status(404).json({ error: 'Product not found' });
+    res.json(product);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 const normalizeProductInput = (body) => ({
@@ -705,38 +348,50 @@ const validateProductInput = (product) => {
 
 app.get('/api/admin/summary', requireAdmin, async (req, res) => {
   try {
-    const connection = db.promise();
-    const [[productStats]] = await connection.query(`
-      SELECT COUNT(*) AS product_count,
-        COALESCE(SUM(stock), 0) AS units_in_stock,
-        COALESCE(SUM(CASE WHEN stock <= 10 THEN 1 ELSE 0 END), 0) AS low_stock_count
-      FROM products
-    `);
-    const [[orderStats]] = await connection.query(`
-      SELECT COUNT(*) AS order_count,
-        COALESCE(SUM(CASE WHEN status IN ('pending', 'processing') THEN 1 ELSE 0 END), 0) AS open_orders,
-        COALESCE(SUM(CASE WHEN status <> 'cancelled' THEN total_amount ELSE 0 END), 0) AS gross_sales,
-        COALESCE(SUM(CASE WHEN payment_status = 'paid' THEN total_amount ELSE 0 END), 0) AS paid_sales
-      FROM orders
-    `);
-    const customerSql = ADMIN_EMAILS.length
-      ? 'SELECT COUNT(*) AS customer_count FROM users WHERE LOWER(email) NOT IN (?)'
-      : 'SELECT COUNT(*) AS customer_count FROM users';
-    const [[customerStats]] = await connection.query(customerSql, ADMIN_EMAILS.length ? [ADMIN_EMAILS] : []);
-    const [[savedAddressStats]] = await connection.query(`
-      SELECT COUNT(*) AS saved_addresses_count FROM saved_addresses
-    `);
-    res.json({ ...productStats, ...orderStats, ...customerStats, ...savedAddressStats });
+    const productCount = await Product.countDocuments();
+    const products = await Product.find({}, { stock: 1 });
+    const unitsInStock = products.reduce((sum, p) => sum + (p.stock || 0), 0);
+    const lowStockCount = products.filter(p => p.stock <= 10).length;
+
+    const orderCount = await Order.countDocuments();
+    const openOrders = await Order.countDocuments({ status: { $in: ['pending', 'processing'] } });
+    const nonCancelledOrders = await Order.find({ status: { $ne: 'cancelled' } }, { total_amount: 1 });
+    const grossSales = nonCancelledOrders.reduce((sum, o) => sum + (o.total_amount || 0), 0);
+    const paidOrders = await Order.find({ payment_status: 'paid' }, { total_amount: 1 });
+    const paidSales = paidOrders.reduce((sum, o) => sum + (o.total_amount || 0), 0);
+
+    let customerCount;
+    if (ADMIN_EMAILS.length) {
+      customerCount = await User.countDocuments({ email: { $nin: ADMIN_EMAILS.map(e => new RegExp(`^${e.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i')) } });
+    } else {
+      customerCount = await User.countDocuments();
+    }
+
+    const savedAddressesCount = await SavedAddress.countDocuments();
+
+    res.json({
+      product_count: productCount,
+      units_in_stock: unitsInStock,
+      low_stock_count: lowStockCount,
+      order_count: orderCount,
+      open_orders: openOrders,
+      gross_sales: grossSales,
+      paid_sales: paidSales,
+      customer_count: customerCount,
+      saved_addresses_count: savedAddressesCount
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-app.get('/api/admin/products', requireAdmin, (req, res) => {
-  db.query('SELECT * FROM products ORDER BY created_at DESC, id DESC', (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
-  });
+app.get('/api/admin/products', requireAdmin, async (req, res) => {
+  try {
+    const products = await Product.find().sort({ created_at: -1, _id: -1 });
+    res.json(products);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 app.post('/api/admin/products', requireAdmin, async (req, res) => {
@@ -745,8 +400,7 @@ app.post('/api/admin/products', requireAdmin, async (req, res) => {
   if (validationError) return res.status(400).json({ error: validationError });
 
   try {
-    const [result] = await db.promise().query('INSERT INTO products SET ?', product);
-    const [[created]] = await db.promise().query('SELECT * FROM products WHERE id = ?', [result.insertId]);
+    const created = await Product.create(product);
     res.status(201).json(created);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -759,9 +413,8 @@ app.put('/api/admin/products/:id', requireAdmin, async (req, res) => {
   if (validationError) return res.status(400).json({ error: validationError });
 
   try {
-    const [result] = await db.promise().query('UPDATE products SET ? WHERE id = ?', [product, req.params.id]);
-    if (result.affectedRows === 0) return res.status(404).json({ error: 'Product not found' });
-    const [[updated]] = await db.promise().query('SELECT * FROM products WHERE id = ?', [req.params.id]);
+    const updated = await Product.findByIdAndUpdate(req.params.id, product, { new: true, runValidators: true });
+    if (!updated) return res.status(404).json({ error: 'Product not found' });
     res.json(updated);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -770,55 +423,102 @@ app.put('/api/admin/products/:id', requireAdmin, async (req, res) => {
 
 app.delete('/api/admin/products/:id', requireAdmin, async (req, res) => {
   try {
-    const [result] = await db.promise().query('DELETE FROM products WHERE id = ?', [req.params.id]);
-    if (result.affectedRows === 0) return res.status(404).json({ error: 'Product not found' });
-    res.json({ message: 'Product deleted' });
-  } catch (error) {
-    if (error.code === 'ER_ROW_IS_REFERENCED_2' || error.code === 'ER_ROW_IS_REFERENCED') {
+    // Check if product is referenced in orders before deleting
+    const orderItemCount = await OrderItem.countDocuments({ product_id: req.params.id });
+    if (orderItemCount > 0) {
       return res.status(409).json({ error: 'This product is used by orders and cannot be deleted' });
     }
+    const result = await Product.findByIdAndDelete(req.params.id);
+    if (!result) return res.status(404).json({ error: 'Product not found' });
+    res.json({ message: 'Product deleted' });
+  } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-app.get('/api/admin/orders', requireAdmin, (req, res) => {
-  db.query(`
-    SELECT o.id, o.total_amount, o.status, o.payment_method, o.payment_status,
-      o.delivery_address, o.created_at,
-      COALESCE(o.customer_name, u.name, 'Guest') AS customer_name,
-      COALESCE(o.customer_email, u.email, '') AS customer_email,
-      COALESCE(o.customer_phone, u.phone, '') AS customer_phone,
-      JSON_ARRAYAGG(JSON_OBJECT(
-        'product_id', oi.product_id,
-        'product_name', COALESCE(oi.product_name, p.name, CONCAT('Product #', oi.product_id)),
-        'quantity', oi.quantity,
-        'price', oi.price,
-        'product_color', oi.product_color,
-        'product_color_image', oi.product_color_image,
-        'product_size', oi.product_size
-      )) AS items
-    FROM orders o
-    LEFT JOIN users u ON o.user_id = u.id
-    LEFT JOIN order_items oi ON o.id = oi.order_id
-    LEFT JOIN products p ON oi.product_id = p.id
-    GROUP BY o.id
-    ORDER BY o.created_at DESC, o.id DESC
-    LIMIT 250
-  `, (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
-  });
+app.get('/api/admin/orders', requireAdmin, async (req, res) => {
+  try {
+    const orders = await Order.aggregate([
+      {
+        $lookup: {
+          from: 'orderitems',
+          localField: '_id',
+          foreignField: 'order_id',
+          as: 'items'
+        }
+      },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'user_id',
+          foreignField: '_id',
+          as: 'user'
+        }
+      },
+      { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+      {
+        $addFields: {
+          customer_name_display: { $ifNull: ['$customer_name', { $ifNull: ['$user.name', 'Guest'] }] },
+          customer_email_display: { $ifNull: ['$customer_email', { $ifNull: ['$user.email', ''] }] },
+          customer_phone_display: { $ifNull: ['$customer_phone', { $ifNull: ['$user.phone', ''] }] }
+        }
+      },
+      {
+        $project: {
+          _id: 1,
+          id: '$_id',
+          total_amount: 1,
+          status: 1,
+          payment_method: 1,
+          payment_status: 1,
+          delivery_address: 1,
+          created_at: 1,
+          customer_name: '$customer_name_display',
+          customer_email: '$customer_email_display',
+          customer_phone: '$customer_phone_display',
+          items: 1
+        }
+      },
+      { $sort: { created_at: -1, _id: -1 } },
+      { $limit: 250 }
+    ]);
+
+    // Enrich items with product names
+    const enrichedOrders = await Promise.all(orders.map(async (order) => {
+      const enrichedItems = await Promise.all(order.items.map(async (item) => {
+        let productName = item.product_name;
+        if (!productName) {
+          const product = await Product.findById(item.product_id).select('name');
+          productName = product ? product.name : `Product #${item.product_id}`;
+        }
+        return {
+          product_id: item.product_id,
+          product_name: productName,
+          quantity: item.quantity,
+          price: item.price,
+          product_color: item.product_color || '',
+          product_color_image: item.product_color_image || '',
+          product_size: item.product_size || ''
+        };
+      }));
+      return { ...order, items: enrichedItems };
+    }));
+
+    res.json(enrichedOrders);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
-// Delete all orders (admin only) — clears order_items first due to FK constraints
-app.delete('/api/admin/orders', requireAdmin, (req, res) => {
-  db.query('DELETE FROM order_items', (err) => {
-    if (err) return res.status(500).json({ error: err.message });
-    db.query('DELETE FROM orders', (err) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ message: 'All orders have been deleted.' });
-    });
-  });
+// Delete all orders (admin only)
+app.delete('/api/admin/orders', requireAdmin, async (req, res) => {
+  try {
+    await OrderItem.deleteMany({});
+    await Order.deleteMany({});
+    res.json({ message: 'All orders have been deleted.' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 app.patch('/api/admin/orders/:id', requireAdmin, async (req, res) => {
@@ -838,7 +538,6 @@ app.patch('/api/admin/orders/:id', requireAdmin, async (req, res) => {
     }
     update.payment_status = req.body.payment_status;
   }
-  // Allow updating customer info fields (name, email, phone, delivery address)
   if (req.body.customer_name != null) {
     update.customer_name = String(req.body.customer_name).trim();
   }
@@ -856,12 +555,8 @@ app.patch('/api/admin/orders/:id', requireAdmin, async (req, res) => {
   }
 
   try {
-    const [result] = await db.promise().query('UPDATE orders SET ? WHERE id = ?', [update, req.params.id]);
-    if (result.affectedRows === 0) return res.status(404).json({ error: 'Order not found' });
-    const [[updated]] = await db.promise().query(
-      'SELECT id, customer_name, customer_email, customer_phone, delivery_address, status, payment_status, total_amount, created_at FROM orders WHERE id = ?',
-      [req.params.id]
-    );
+    const updated = await Order.findByIdAndUpdate(req.params.id, update, { new: true });
+    if (!updated) return res.status(404).json({ error: 'Order not found' });
     res.json(updated);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -882,105 +577,141 @@ app.post('/api/admin/upload', requireAdmin, upload.single('image'), (req, res) =
 });
 
 // Admin: List all saved addresses
-app.get('/api/admin/saved-addresses', requireAdmin, (req, res) => {
-  db.query(`
-    SELECT sa.*, u.name AS user_name, u.email AS user_email
-    FROM saved_addresses sa
-    LEFT JOIN users u ON sa.user_id = u.id
-    ORDER BY sa.created_at DESC
-  `, (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
-  });
+app.get('/api/admin/saved-addresses', requireAdmin, async (req, res) => {
+  try {
+    const addresses = await SavedAddress.aggregate([
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'user_id',
+          foreignField: '_id',
+          as: 'user'
+        }
+      },
+      { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+      {
+        $addFields: {
+          user_name: '$user.name',
+          user_email: '$user.email'
+        }
+      },
+      { $project: { user: 0 } },
+      { $sort: { created_at: -1 } }
+    ]);
+    res.json(addresses);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Admin: Delete ALL saved addresses
-app.delete('/api/admin/saved-addresses', requireAdmin, (req, res) => {
-  db.query('DELETE FROM saved_addresses', (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ message: 'All saved addresses deleted', count: result.affectedRows });
-  });
+app.delete('/api/admin/saved-addresses', requireAdmin, async (req, res) => {
+  try {
+    const result = await SavedAddress.deleteMany({});
+    res.json({ message: 'All saved addresses deleted', count: result.deletedCount });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Saved Addresses CRUD
-app.get('/api/saved-addresses', authenticateToken, (req, res) => {
-  db.query('SELECT * FROM saved_addresses WHERE user_id = ? ORDER BY is_default DESC, created_at DESC', [req.user.id], (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
-  });
+app.get('/api/saved-addresses', authenticateToken, async (req, res) => {
+  try {
+    const addresses = await SavedAddress.find({ user_id: req.user.id }).sort({ is_default: -1, created_at: -1 });
+    res.json(addresses);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Delete ALL saved addresses for the current user
-app.delete('/api/saved-addresses', authenticateToken, (req, res) => {
-  db.query('DELETE FROM saved_addresses WHERE user_id = ?', [req.user.id], (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ message: 'All saved addresses deleted', count: result.affectedRows });
-  });
+app.delete('/api/saved-addresses', authenticateToken, async (req, res) => {
+  try {
+    const result = await SavedAddress.deleteMany({ user_id: req.user.id });
+    res.json({ message: 'All saved addresses deleted', count: result.deletedCount });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
-app.post('/api/saved-addresses', authenticateToken, (req, res) => {
+app.post('/api/saved-addresses', authenticateToken, async (req, res) => {
   const { label, address, house_no, street, locality, city, pincode, landmark, phone, is_default, customer_name, customer_email, state } = req.body;
   if (!address && !house_no) return res.status(400).json({ error: 'Address or house number is required' });
   if (!pincode) return res.status(400).json({ error: 'PIN code is required' });
   if (!city) return res.status(400).json({ error: 'City is required' });
 
-  // Deduplication: use INSERT IGNORE with the UNIQUE constraint on (user_id, address, city, pincode)
-  const saveAddress = (makeDefault) => {
-    db.query(
-      `INSERT IGNORE INTO saved_addresses (user_id, label, customer_name, customer_email, address, house_no, street, locality, city, state, pincode, landmark, phone, is_default)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [req.user.id, label || 'Home', customer_name || '', customer_email || '', address || '', house_no || '', street || '', locality || '', city, state || '', pincode, landmark || '', phone || '', makeDefault ? 1 : 0],
-      (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
-        if (result.affectedRows === 0) {
-          // Duplicate — return the existing one
-          db.query(
-            'SELECT * FROM saved_addresses WHERE user_id = ? AND address = ? AND house_no = ? AND city = ? AND pincode = ? LIMIT 1',
-            [req.user.id, address || '', house_no || '', city, pincode],
-            (err2, existing) => {
-              if (err2) return res.status(500).json({ error: err2.message });
-              // Update fields on the existing record
-              const updateFields = {};
-              if (label) updateFields.label = label;
-              if (makeDefault) updateFields.is_default = 1;
-              if (customer_name) updateFields.customer_name = customer_name;
-              if (customer_email) updateFields.customer_email = customer_email;
-              if (state) updateFields.state = state;
-              if (house_no) updateFields.house_no = house_no;
-              if (street) updateFields.street = street;
-              if (locality) updateFields.locality = locality;
-              if (landmark) updateFields.landmark = landmark;
-              if (phone) updateFields.phone = phone;
-              if (Object.keys(updateFields).length > 0) {
-                db.query('UPDATE saved_addresses SET ? WHERE id = ?', [updateFields, existing[0].id]);
-              }
-              res.json(existing[0]);
-            }
-          );
-        } else {
-          db.query('SELECT * FROM saved_addresses WHERE id = ?', [result.insertId], (err2, created) => {
-            if (err2) return res.status(500).json({ error: err2.message });
-            res.status(201).json(created[0]);
-          });
-        }
-      }
-    );
-  };
+  try {
+    if (is_default) {
+      await SavedAddress.updateMany({ user_id: req.user.id }, { is_default: 0 });
+    }
 
-  if (is_default) {
-    db.query('UPDATE saved_addresses SET is_default = 0 WHERE user_id = ?', [req.user.id], (err) => {
-      if (err) return res.status(500).json({ error: err.message });
-      saveAddress(true);
+    // Check for duplicate
+    const existing = await SavedAddress.findOne({
+      user_id: req.user.id,
+      address: address || '',
+      city: city,
+      pincode: pincode
     });
-  } else {
-    saveAddress(false);
+
+    if (existing) {
+      // Update existing record with new fields
+      const updateFields = {};
+      if (label) updateFields.label = label;
+      if (is_default) updateFields.is_default = 1;
+      if (customer_name) updateFields.customer_name = customer_name;
+      if (customer_email) updateFields.customer_email = customer_email;
+      if (state) updateFields.state = state;
+      if (house_no) updateFields.house_no = house_no;
+      if (street) updateFields.street = street;
+      if (locality) updateFields.locality = locality;
+      if (landmark) updateFields.landmark = landmark;
+      if (phone) updateFields.phone = phone;
+      if (Object.keys(updateFields).length > 0) {
+        await SavedAddress.updateOne({ _id: existing._id }, updateFields);
+      }
+      return res.json(existing);
+    }
+
+    const created = await SavedAddress.create({
+      user_id: req.user.id,
+      label: label || 'Home',
+      customer_name: customer_name || '',
+      customer_email: customer_email || '',
+      address: address || '',
+      house_no: house_no || '',
+      street: street || '',
+      locality: locality || '',
+      city,
+      state: state || '',
+      pincode,
+      landmark: landmark || '',
+      phone: phone || '',
+      is_default: is_default ? 1 : 0
+    });
+    res.status(201).json(created);
+  } catch (error) {
+    if (error.code === 11000) {
+      // Duplicate key error — compound index violation, return existing
+      const existing = await SavedAddress.findOne({
+        user_id: req.user.id,
+        address: address || '',
+        city: city,
+        pincode: pincode
+      });
+      if (existing) return res.json(existing);
+    }
+    res.status(500).json({ error: error.message });
   }
 });
 
-app.put('/api/saved-addresses/:id', authenticateToken, (req, res) => {
+app.put('/api/saved-addresses/:id', authenticateToken, async (req, res) => {
   const { label, address, house_no, street, locality, city, pincode, landmark, phone, is_default, customer_name, customer_email, state } = req.body;
 
-  const updateAddress = (makeDefault) => {
+  try {
+    if (is_default) {
+      await SavedAddress.updateMany({ user_id: req.user.id }, { is_default: 0 });
+    }
+
     const updates = {};
     if (label !== undefined) updates.label = label;
     if (address !== undefined) updates.address = address;
@@ -994,34 +725,28 @@ app.put('/api/saved-addresses/:id', authenticateToken, (req, res) => {
     if (customer_name !== undefined) updates.customer_name = customer_name;
     if (customer_email !== undefined) updates.customer_email = customer_email;
     if (state !== undefined) updates.state = state;
-    updates.is_default = makeDefault ? 1 : 0;
+    updates.is_default = is_default ? 1 : 0;
 
-    db.query('UPDATE saved_addresses SET ? WHERE id = ? AND user_id = ?', [updates, req.params.id, req.user.id], (err, result) => {
-      if (err) return res.status(500).json({ error: err.message });
-      if (result.affectedRows === 0) return res.status(404).json({ error: 'Address not found' });
-      db.query('SELECT * FROM saved_addresses WHERE id = ?', [req.params.id], (err2, updated) => {
-        if (err2) return res.status(500).json({ error: err2.message });
-        res.json(updated[0]);
-      });
-    });
-  };
-
-  if (is_default) {
-    db.query('UPDATE saved_addresses SET is_default = 0 WHERE user_id = ?', [req.user.id], (err) => {
-      if (err) return res.status(500).json({ error: err.message });
-      updateAddress(true);
-    });
-  } else {
-    updateAddress(false);
+    const updated = await SavedAddress.findOneAndUpdate(
+      { _id: req.params.id, user_id: req.user.id },
+      updates,
+      { new: true }
+    );
+    if (!updated) return res.status(404).json({ error: 'Address not found' });
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
-app.delete('/api/saved-addresses/:id', authenticateToken, (req, res) => {
-  db.query('DELETE FROM saved_addresses WHERE id = ? AND user_id = ?', [req.params.id, req.user.id], (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (result.affectedRows === 0) return res.status(404).json({ error: 'Address not found' });
+app.delete('/api/saved-addresses/:id', authenticateToken, async (req, res) => {
+  try {
+    const result = await SavedAddress.findOneAndDelete({ _id: req.params.id, user_id: req.user.id });
+    if (!result) return res.status(404).json({ error: 'Address not found' });
     res.json({ message: 'Address deleted' });
-  });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Request OTP for signup
@@ -1029,10 +754,9 @@ app.post('/api/request-otp', async (req, res) => {
   const { name, email, phone, method } = req.body;
   if (!email) return res.status(400).json({ error: 'Email is required to send OTP' });
 
-  // Check if email already registered
-  db.query('SELECT id FROM users WHERE email = ?', [email], (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (results.length > 0) {
+  try {
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
       return res.status(400).json({ error: 'Email already registered. Please login instead.' });
     }
 
@@ -1048,18 +772,17 @@ app.post('/api/request-otp', async (req, res) => {
     const deliveryMethod = method === 'whatsapp' ? 'WhatsApp' : 'Email';
     const mailText = `Hello ${otpStore[email].name},<br><br>Your MXERA signup OTP is <strong>${otp}</strong>.<br>This code will expire in 5 minutes.<br><br>Thank you,<br>MXERA Team`;
 
-    transporter.sendMail({
+    await transporter.sendMail({
       from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
       to: email,
       subject: 'MXERA Verification Code',
       html: mailText
-    }).then(() => {
-      res.json({ message: `OTP sent to ${deliveryMethod.toLowerCase()} ${email}`, target: 'email' });
-    }).catch(error => {
-      console.error('OTP email error:', error);
-      res.status(500).json({ error: `Unable to send OTP email: ${error.message}` });
     });
-  });
+    res.json({ message: `OTP sent to ${deliveryMethod.toLowerCase()} ${email}`, target: 'email' });
+  } catch (error) {
+    console.error('OTP email error:', error);
+    res.status(500).json({ error: `Unable to send OTP email: ${error.message}` });
+  }
 });
 
 // Verify OTP
@@ -1083,38 +806,32 @@ app.post('/api/request-password-reset', async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: 'Email is required' });
 
-  db.query('SELECT id, name FROM users WHERE email = ?', [email], async (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-
-    if (results.length === 0) {
-      // respond success to avoid account enumeration
+  try {
+    const user = await User.findOne({ email });
+    if (!user) {
       return res.json({ message: 'If that email exists, a reset link has been sent.' });
     }
 
-    const user = results[0];
     const token = crypto.randomBytes(24).toString('hex');
     const expiresAt = Date.now() + 60 * 60 * 1000; // 1 hour
 
-    db.query('INSERT INTO password_resets (user_id, token, expires_at) VALUES (?, ?, ?)', [user.id, token, expiresAt], (err) => {
-      if (err) return res.status(500).json({ error: err.message });
+    await PasswordReset.create({ user_id: user._id, token, expires_at: expiresAt });
 
-      const clientUrl = process.env.CLIENT_URL || `http://localhost:${PORT}`;
-      const resetLink = `${clientUrl.replace(/\/$/, '')}/reset.html?token=${token}`;
-      const mailText = `Hello ${user.name || 'MXERA User'},<br><br>Click the link below to reset your password (valid for 1 hour):<br><a href="${resetLink}">${resetLink}</a><br><br>If you didn't request this, ignore this email.<br><br>Thanks,<br>MXERA Team`;
+    const clientUrl = process.env.CLIENT_URL || `http://localhost:${PORT}`;
+    const resetLink = `${clientUrl.replace(/\/$/, '')}/reset.html?token=${token}`;
+    const mailText = `Hello ${user.name || 'MXERA User'},<br><br>Click the link below to reset your password (valid for 1 hour):<br><a href="${resetLink}">${resetLink}</a><br><br>If you didn't request this, ignore this email.<br><br>Thanks,<br>MXERA Team`;
 
-      transporter.sendMail({
-        from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
-        to: email,
-        subject: 'MXERA Password Reset',
-        html: mailText
-      }).then(() => {
-        res.json({ message: 'If that email exists, a reset link has been sent.' });
-      }).catch(error => {
-        console.error('Password reset email error:', error);
-        res.status(500).json({ error: 'Failed to send reset email' });
-      });
+    await transporter.sendMail({
+      from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
+      to: email,
+      subject: 'MXERA Password Reset',
+      html: mailText
     });
-  });
+    res.json({ message: 'If that email exists, a reset link has been sent.' });
+  } catch (error) {
+    console.error('Password reset email error:', error);
+    res.status(500).json({ error: 'Failed to send reset email' });
+  }
 });
 
 // Reset Password
@@ -1122,24 +839,18 @@ app.post('/api/reset-password', async (req, res) => {
   const { token, password } = req.body;
   if (!token || !password) return res.status(400).json({ error: 'Token and password are required' });
 
-  db.query('SELECT pr.id, pr.user_id, pr.expires_at, u.email FROM password_resets pr JOIN users u ON pr.user_id = u.id WHERE pr.token = ?', [token], async (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (results.length === 0) return res.status(400).json({ error: 'Invalid or expired token' });
+  try {
+    const resetRecord = await PasswordReset.findOne({ token }).populate('user_id');
+    if (!resetRecord) return res.status(400).json({ error: 'Invalid or expired token' });
+    if (resetRecord.expires_at < Date.now()) return res.status(400).json({ error: 'Token expired' });
 
-    const record = results[0];
-    if (record.expires_at < Date.now()) return res.status(400).json({ error: 'Token expired' });
-
-    try {
-      const hashed = await bcrypt.hash(password, 10);
-      db.query('UPDATE users SET password = ? WHERE id = ?', [hashed, record.user_id], (err) => {
-        if (err) return res.status(500).json({ error: err.message });
-        db.query('DELETE FROM password_resets WHERE id = ?', [record.id]);
-        res.json({ message: 'Password reset successful' });
-      });
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to reset password' });
-    }
-  });
+    const hashed = await bcrypt.hash(password, 10);
+    await User.updateOne({ _id: resetRecord.user_id._id }, { password: hashed });
+    await PasswordReset.deleteOne({ _id: resetRecord._id });
+    res.json({ message: 'Password reset successful' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to reset password' });
+  }
 });
 
 // User Registration
@@ -1147,257 +858,332 @@ app.post('/api/register', async (req, res) => {
   const sessionId = req.headers['x-session-id'] || req.sessionID;
   const { name, email, password, phone, gender } = req.body;
 
-  // Check if email already exists
-  db.query('SELECT id FROM users WHERE email = ?', [email], (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (results.length > 0) {
+  try {
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
       return res.status(400).json({ error: 'Email already registered' });
     }
 
-    // Email doesn't exist, proceed with registration
-    bcrypt.hash(password, 10, (hashErr, hashedPassword) => {
-      if (hashErr) return res.status(500).json({ error: 'Registration failed' });
-
-      db.query('INSERT INTO users (name, email, password, phone, gender) VALUES (?, ?, ?, ?, ?)',
-        [name, email, hashedPassword, phone, gender || 'other'],
-        (insertErr, result) => {
-          if (insertErr) {
-            if (insertErr.code === 'ER_DUP_ENTRY') {
-              return res.status(400).json({ error: 'Email already registered' });
-            }
-            return res.status(500).json({ error: insertErr.message });
-          }
-          delete otpStore[email];
-          mergeSessionToUser(sessionId, result.insertId, (mergeErr) => {
-            if (mergeErr) console.error('Session merge error:', mergeErr);
-            res.json({ message: 'Registration successful', userId: result.insertId });
-          });
-        }
-      );
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const user = await User.create({
+      name,
+      email,
+      password: hashedPassword,
+      phone,
+      gender: gender || 'other'
     });
-  });
+
+    delete otpStore[email];
+    await mergeSessionToUser(sessionId, user._id);
+    res.json({ message: 'Registration successful', userId: user._id });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({ error: 'Email already registered' });
+    }
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // User Login
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
   const sessionId = req.headers['x-session-id'] || req.sessionID;
 
-  db.query('SELECT * FROM users WHERE email = ?', [email], async (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (results.length === 0) return res.status(400).json({ error: 'Invalid credentials' });
+  try {
+    const user = await User.findOne({ email });
+    if (!user) return res.status(400).json({ error: 'Invalid credentials' });
 
-    const user = results[0];
     const validPassword = await bcrypt.compare(password, user.password);
+    if (!validPassword) return res.status(400).json({ error: 'Invalid credentials' });
 
-    if (!validPassword) {
-      return res.status(400).json({ error: 'Invalid credentials' });
-    }
-
-    const token = jwt.sign({ id: user.id, email: user.email, name: user.name }, JWT_SECRET, { expiresIn: '7d' });
-    mergeSessionToUser(sessionId, user.id, (mergeErr) => {
-      if (mergeErr) console.error('Session merge error:', mergeErr);
-      res.json({ token, user: { id: user.id, name: user.name, email: user.email } });
-    });
-  });
+    const token = jwt.sign({ id: user._id, email: user.email, name: user.name }, JWT_SECRET, { expiresIn: '7d' });
+    await mergeSessionToUser(sessionId, user._id);
+    res.json({ token, user: { id: user._id, name: user.name, email: user.email } });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Get User Profile
-app.get('/api/user', authenticateToken, (req, res) => {
-  db.query('SELECT id, name, email, phone, address FROM users WHERE id = ?', [req.user.id], (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results[0]);
-  });
+app.get('/api/user', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('id name email phone address');
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Update User Profile
-app.put('/api/user', authenticateToken, (req, res) => {
+app.put('/api/user', authenticateToken, async (req, res) => {
   const { name, phone, address } = req.body;
-  db.query('UPDATE users SET name = ?, phone = ?, address = ? WHERE id = ?',
-    [name, phone, address, req.user.id],
-    (err) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ message: 'Profile updated successfully' });
-    }
-  );
+  try {
+    await User.updateOne({ _id: req.user.id }, { name, phone, address });
+    res.json({ message: 'Profile updated successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Get Cart
-app.get('/api/cart', optionalAuth, (req, res) => {
+app.get('/api/cart', optionalAuth, async (req, res) => {
   const sessionId = req.headers['x-session-id'] || req.sessionID;
   const userId = req.user?.id || null;
 
-  db.query(`
-    SELECT c.id, c.quantity, p.id as product_id, p.name, p.price, p.original_price, p.image, p.tag,
-      c.product_color, c.product_color_image, c.product_size
-    FROM cart c
-    JOIN products p ON c.product_id = p.id
-    WHERE ${userId ? '(c.user_id = ? OR (c.session_id = ? AND c.user_id IS NULL))' : '(c.session_id = ? AND c.user_id IS NULL)'}
-  `, userId ? [userId, sessionId] : [sessionId], (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
-  });
+  try {
+    let cartItems;
+    if (userId) {
+      cartItems = await Cart.find({
+        $or: [
+          { user_id: userId },
+          { session_id: sessionId, user_id: null }
+        ]
+      }).populate('product_id', 'name price original_price image tag');
+    } else {
+      cartItems = await Cart.find({ session_id: sessionId, user_id: null })
+        .populate('product_id', 'name price original_price image tag');
+    }
+
+    const result = cartItems.map(c => ({
+      id: c._id,
+      quantity: c.quantity,
+      product_id: c.product_id?._id || c.product_id,
+      name: c.product_id?.name,
+      price: c.product_id?.price,
+      original_price: c.product_id?.original_price,
+      image: c.product_id?.image,
+      tag: c.product_id?.tag,
+      product_color: c.product_color,
+      product_color_image: c.product_color_image,
+      product_size: c.product_size
+    }));
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Add to Cart
-app.post('/api/cart', optionalAuth, (req, res) => {
+app.post('/api/cart', optionalAuth, async (req, res) => {
   const { productId, quantity = 1, colorName = '', colorImage = '', sizeName = '' } = req.body;
   const sessionId = req.headers['x-session-id'] || req.sessionID;
   const userId = req.user?.id || null;
 
-  // Check if product exists
-  db.query('SELECT id FROM products WHERE id = ?', [productId], (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (results.length === 0) return res.status(404).json({ error: 'Product not found' });
+  try {
+    const product = await Product.findById(productId);
+    if (!product) return res.status(404).json({ error: 'Product not found' });
 
-    // Check if already in cart (match by product_id AND color AND size so same product different color/size = separate entry)
-    db.query('SELECT id, quantity FROM cart WHERE (session_id = ? OR user_id = ?) AND product_id = ? AND product_color = ? AND product_size = ?',
-      [sessionId, userId, productId, colorName, sizeName],
-      (err, existing) => {
-        if (err) return res.status(500).json({ error: err.message });
+    // Check if already in cart (match by product_id AND color AND size)
+    let existing;
+    if (userId) {
+      existing = await Cart.findOne({
+        $or: [
+          { session_id: sessionId, user_id: userId },
+          { user_id: userId }
+        ],
+        product_id: productId,
+        product_color: colorName,
+        product_size: sizeName
+      });
+    } else {
+      existing = await Cart.findOne({
+        session_id: sessionId,
+        product_id: productId,
+        product_color: colorName,
+        product_size: sizeName
+      });
+    }
 
-        if (existing.length > 0) {
-          db.query('UPDATE cart SET quantity = quantity + ? WHERE id = ?',
-            [quantity, existing[0].id],
-            (err) => {
-              if (err) return res.status(500).json({ error: err.message });
-              res.json({ message: 'Cart updated' });
-            }
-          );
-        } else {
-          db.query('INSERT INTO cart (session_id, user_id, product_id, quantity, product_color, product_color_image, product_size) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [sessionId, userId || null, productId, quantity, colorName, colorImage, sizeName],
-            (err) => {
-              if (err) return res.status(500).json({ error: err.message });
-              res.json({ message: 'Added to cart' });
-            }
-          );
-        }
-      }
-    );
-  });
+    if (existing) {
+      existing.quantity += quantity;
+      await existing.save();
+      res.json({ message: 'Cart updated' });
+    } else {
+      await Cart.create({
+        session_id: sessionId,
+        user_id: userId || null,
+        product_id: productId,
+        quantity,
+        product_color: colorName,
+        product_color_image: colorImage,
+        product_size: sizeName
+      });
+      res.json({ message: 'Added to cart' });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Update Cart Quantity
-app.put('/api/cart/:id', optionalAuth, (req, res) => {
+app.put('/api/cart/:id', optionalAuth, async (req, res) => {
   const { quantity } = req.body;
   const sessionId = req.headers['x-session-id'] || req.sessionID;
   const userId = req.user?.id || null;
 
-  if (quantity <= 0) {
-    db.query('DELETE FROM cart WHERE id = ? AND (session_id = ? OR user_id = ?)',
-      [req.params.id, sessionId, userId],
-      (err) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ message: 'Item removed' });
-      }
-    );
-  } else {
-    db.query('UPDATE cart SET quantity = ? WHERE id = ? AND (session_id = ? OR user_id = ?)',
-      [quantity, req.params.id, sessionId, userId],
-      (err) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ message: 'Cart updated' });
-      }
-    );
+  try {
+    if (quantity <= 0) {
+      await Cart.findOneAndDelete({
+        _id: req.params.id,
+        $or: [
+          { session_id: sessionId },
+          { user_id: userId }
+        ]
+      });
+      res.json({ message: 'Item removed' });
+    } else {
+      await Cart.findOneAndUpdate(
+        {
+          _id: req.params.id,
+          $or: [
+            { session_id: sessionId },
+            { user_id: userId }
+          ]
+        },
+        { quantity }
+      );
+      res.json({ message: 'Cart updated' });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
 // Remove from Cart
-app.delete('/api/cart/:id', optionalAuth, (req, res) => {
+app.delete('/api/cart/:id', optionalAuth, async (req, res) => {
   const sessionId = req.headers['x-session-id'] || req.sessionID;
   const userId = req.user?.id || null;
 
-  db.query('DELETE FROM cart WHERE id = ? AND (session_id = ? OR user_id = ?)',
-    [req.params.id, sessionId, userId],
-    (err) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ message: 'Item removed' });
-    }
-  );
+  try {
+    await Cart.findOneAndDelete({
+      _id: req.params.id,
+      $or: [
+        { session_id: sessionId },
+        { user_id: userId }
+      ]
+    });
+    res.json({ message: 'Item removed' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Clear Cart
-app.delete('/api/cart', optionalAuth, (req, res) => {
+app.delete('/api/cart', optionalAuth, async (req, res) => {
   const sessionId = req.headers['x-session-id'] || req.sessionID;
   const userId = req.user?.id || null;
 
-  db.query('DELETE FROM cart WHERE session_id = ? OR user_id = ?',
-    [sessionId, userId],
-    (err) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ message: 'Cart cleared' });
-    }
-  );
+  try {
+    await Cart.deleteMany({
+      $or: [
+        { session_id: sessionId },
+        { user_id: userId }
+      ]
+    });
+    res.json({ message: 'Cart cleared' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Get Wishlist
-app.get('/api/wishlist', optionalAuth, (req, res) => {
+app.get('/api/wishlist', optionalAuth, async (req, res) => {
   const sessionId = req.headers['x-session-id'] || req.sessionID;
   const userId = req.user?.id || null;
 
-  db.query(`
-    SELECT w.id, p.id as product_id, p.name, p.price, p.original_price, p.image, p.tag, p.rating
-    FROM wishlist w
-    JOIN products p ON w.product_id = p.id
-    WHERE ${userId ? '(w.user_id = ? OR (w.session_id = ? AND w.user_id IS NULL))' : '(w.session_id = ? AND w.user_id IS NULL)'}
-  `, userId ? [userId, sessionId] : [sessionId], (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
-  });
+  try {
+    let wishlistItems;
+    if (userId) {
+      wishlistItems = await Wishlist.find({
+        $or: [
+          { user_id: userId },
+          { session_id: sessionId, user_id: null }
+        ]
+      }).populate('product_id', 'name price original_price image tag rating');
+    } else {
+      wishlistItems = await Wishlist.find({ session_id: sessionId, user_id: null })
+        .populate('product_id', 'name price original_price image tag rating');
+    }
+
+    const result = wishlistItems.map(w => ({
+      id: w._id,
+      product_id: w.product_id?._id || w.product_id,
+      name: w.product_id?.name,
+      price: w.product_id?.price,
+      original_price: w.product_id?.original_price,
+      image: w.product_id?.image,
+      tag: w.product_id?.tag,
+      rating: w.product_id?.rating
+    }));
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Add to Wishlist
-app.post('/api/wishlist', optionalAuth, (req, res) => {
+app.post('/api/wishlist', optionalAuth, async (req, res) => {
   const { productId } = req.body;
   const sessionId = req.headers['x-session-id'] || req.sessionID;
   const userId = req.user?.id || null;
 
-  db.query('SELECT id FROM products WHERE id = ?', [productId], (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (results.length === 0) return res.status(404).json({ error: 'Product not found' });
+  try {
+    const product = await Product.findById(productId);
+    if (!product) return res.status(404).json({ error: 'Product not found' });
 
-    db.query('SELECT id, session_id, user_id FROM wishlist WHERE product_id = ? AND (session_id = ? OR user_id = ?)',
-      [productId, sessionId, userId],
-      (err, existing) => {
-        if (err) return res.status(500).json({ error: err.message });
+    let existing;
+    if (userId) {
+      existing = await Wishlist.findOne({
+        $or: [
+          { session_id: sessionId, user_id: userId },
+          { user_id: userId }
+        ],
+        product_id: productId
+      });
+    } else {
+      existing = await Wishlist.findOne({
+        session_id: sessionId,
+        product_id: productId
+      });
+    }
 
-        if (existing.length > 0) {
-          const entry = existing[0];
-          if (userId && entry.session_id === sessionId && !entry.user_id) {
-            db.query('UPDATE wishlist SET user_id = ? WHERE id = ?', [userId, entry.id], (err) => {
-              if (err) return res.status(500).json({ error: err.message });
-              return res.json({ message: 'Added to wishlist' });
-            });
-          } else {
-            return res.json({ message: 'Already in wishlist' });
-          }
-        } else {
-          db.query('INSERT INTO wishlist (session_id, user_id, product_id) VALUES (?, ?, ?)',
-            [sessionId, userId || null, productId],
-            (err) => {
-              if (err) return res.status(500).json({ error: err.message });
-              res.json({ message: 'Added to wishlist' });
-            }
-          );
-        }
+    if (existing) {
+      if (userId && !existing.user_id) {
+        existing.user_id = userId;
+        await existing.save();
+        return res.json({ message: 'Added to wishlist' });
       }
-    );
-  });
+      return res.json({ message: 'Already in wishlist' });
+    }
+
+    await Wishlist.create({
+      session_id: sessionId,
+      user_id: userId || null,
+      product_id: productId
+    });
+    res.json({ message: 'Added to wishlist' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Remove from Wishlist
-app.delete('/api/wishlist/:productId', optionalAuth, (req, res) => {
+app.delete('/api/wishlist/:productId', optionalAuth, async (req, res) => {
   const sessionId = req.headers['x-session-id'] || req.sessionID;
   const userId = req.user?.id || null;
 
-  db.query('DELETE FROM wishlist WHERE product_id = ? AND (session_id = ? OR user_id = ?)',
-    [req.params.productId, sessionId, userId],
-    (err) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ message: 'Removed from wishlist' });
-    }
-  );
+  try {
+    await Wishlist.findOneAndDelete({
+      product_id: req.params.productId,
+      $or: [
+        { session_id: sessionId },
+        { user_id: userId }
+      ]
+    });
+    res.json({ message: 'Removed from wishlist' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Create Order
@@ -1428,40 +1214,6 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
     return res.status(400).json({ error: 'Name, phone, email, and address are required' });
   }
 
-  // Ensure orders and order_items tables exist before placing order
-  try {
-    await db.promise().query(`CREATE TABLE IF NOT EXISTS orders (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      user_id INT,
-      idempotency_key VARCHAR(100) UNIQUE,
-      customer_name VARCHAR(150),
-      customer_email VARCHAR(255),
-      customer_phone VARCHAR(30),
-      payment_method VARCHAR(50) DEFAULT 'cod',
-      payment_status VARCHAR(50) DEFAULT 'pending',
-      total_amount DECIMAL(10,2) NOT NULL,
-      status VARCHAR(50) DEFAULT 'pending',
-      delivery_address TEXT,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )`);
-    await db.promise().query(`CREATE TABLE IF NOT EXISTS order_items (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      order_id INT NOT NULL,
-      product_id INT NOT NULL,
-      product_name VARCHAR(255) DEFAULT '',
-      quantity INT NOT NULL,
-      price DECIMAL(10,2) NOT NULL,
-      product_color VARCHAR(100) DEFAULT '',
-      product_color_image VARCHAR(500) DEFAULT '',
-      product_size VARCHAR(50) DEFAULT '',
-      FOREIGN KEY (order_id) REFERENCES orders(id),
-      FOREIGN KEY (product_id) REFERENCES products(id)
-    )`);
-  } catch (tableErr) {
-    console.error('Order table creation error:', tableErr.message);
-    return res.status(500).json({ error: 'Unable to place order. Please try again later.' });
-  }
-
   const orderItems = items.map(item => ({
     product_id: item.product_id || item.id,
     name: item.name,
@@ -1484,201 +1236,238 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
   }
   const totalAmount = orderItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
 
-  const connection = db.promise();
+  // Start a MongoDB session for transaction
+  const mongoSession = await mongoose.startSession();
   let orderId;
 
   try {
-    await connection.beginTransaction();
-    const [result] = await connection.query(
-      `INSERT INTO orders (
-        user_id,
-        idempotency_key,
-        customer_name,
-        customer_email,
-        customer_phone,
-        payment_method,
-        payment_status,
-        total_amount,
-        delivery_address
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        req.user?.id || null,
-        orderKey,
-        customerName,
-        customerEmail,
-        customerPhone,
-        paymentMethod || 'cod',
-        paymentMethod === 'cod' ? 'pending' : 'awaiting',
-        totalAmount,
-        address
-      ]
-    );
-    orderId = result.insertId;
-
-    for (const item of orderItems) {
-      const [stockUpdate] = await connection.query(
-        'UPDATE products SET stock = stock - ? WHERE id = ? AND stock >= ?',
-        [item.quantity, item.product_id, item.quantity]
-      );
-      if (stockUpdate.affectedRows === 0) {
-        throw new Error(`Insufficient stock for product ${item.product_id}`);
+    await mongoSession.withTransaction(async () => {
+      // Check for duplicate idempotency key
+      if (orderKey) {
+        const existingOrder = await Order.findOne({ idempotency_key: orderKey }).session(mongoSession);
+        if (existingOrder) {
+          // Return existing order ID without error
+          orderId = existingOrder._id;
+          return;
+        }
       }
-      await connection.query(
-        'INSERT INTO order_items (order_id, product_id, product_name, quantity, price, product_color, product_color_image, product_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [orderId, item.product_id, item.name || `Product #${item.product_id}`, item.quantity, item.price, item.product_color, item.product_color_image, item.product_size]
-      );
-    }
 
-    await connection.query(
-      'DELETE FROM cart WHERE session_id = ? OR user_id = ?',
-      [sessionId, req.user?.id || null]
-    );
+      const order = await Order.create([{
+        user_id: req.user?.id || null,
+        idempotency_key: orderKey,
+        customer_name: customerName,
+        customer_email: customerEmail,
+        customer_phone: customerPhone,
+        payment_method: paymentMethod || 'cod',
+        payment_status: paymentMethod === 'cod' ? 'pending' : 'awaiting',
+        total_amount: totalAmount,
+        delivery_address: address
+      }], { session: mongoSession });
+      orderId = order[0]._id;
 
-    // Auto-save delivery address to user's saved addresses (deduplicated)
-    if (req.user?.id && address) {
-      const savedAddress = streetAddress || address;
-      await connection.query(
-        `INSERT IGNORE INTO saved_addresses (user_id, label, customer_name, customer_email, address, house_no, street, locality, city, state, pincode, landmark, phone)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          req.user.id,
-          'Order Address',
-          customerName || '',
-          customerEmail || '',
-          savedAddress,
-          house_no || '',
-          street || '',
-          locality || '',
-          city || '',
-          state || '',
-          pincode || '',
-          landmark || '',
-          customerPhone || ''
+      // Create order items and update stock
+      for (const item of orderItems) {
+        const product = await Product.findById(item.product_id).session(mongoSession);
+        if (!product || product.stock < item.quantity) {
+          throw new Error(`Insufficient stock for product ${item.product_id}`);
+        }
+        await Product.updateOne(
+          { _id: item.product_id, stock: { $gte: item.quantity } },
+          { $inc: { stock: -item.quantity } },
+          { session: mongoSession }
+        );
+
+        await OrderItem.create([{
+          order_id: orderId,
+          product_id: item.product_id,
+          product_name: item.name || `Product #${item.product_id}`,
+          quantity: item.quantity,
+          price: item.price,
+          product_color: item.product_color,
+          product_color_image: item.product_color_image,
+          product_size: item.product_size
+        }], { session: mongoSession });
+      }
+
+      // Clear cart
+      await Cart.deleteMany({
+        $or: [
+          { session_id: sessionId },
+          { user_id: req.user?.id || null }
         ]
-      ).catch(() => {}); // Silently fail if address save fails
+      }).session(mongoSession);
+
+      // Auto-save delivery address
+      if (req.user?.id && address) {
+        const savedAddress = streetAddress || address;
+        try {
+          await SavedAddress.create([{
+            user_id: req.user.id,
+            label: 'Order Address',
+            customer_name: customerName || '',
+            customer_email: customerEmail || '',
+            address: savedAddress,
+            house_no: house_no || '',
+            street: street || '',
+            locality: locality || '',
+            city: city || '',
+            state: state || '',
+            pincode: pincode || '',
+            landmark: landmark || '',
+            phone: customerPhone || ''
+          }], { session: mongoSession });
+        } catch (dupErr) {
+          // Silently fail on duplicate address
+        }
+      }
+    });
+
+    if (!orderId) {
+      throw new Error('Order could not be created');
     }
 
-    await connection.commit();
+    // Send notification emails
+    const safeCustomerName = escapeHtml(customerName);
+    const safeCustomerPhone = escapeHtml(customerPhone);
+    const safeCustomerEmail = escapeHtml(customerEmail);
+    const safeAddress = escapeHtml(address);
+    const safePaymentMethod = escapeHtml(paymentMethod || 'cod');
+    const itemRows = renderOrderItemsEmail(orderItems);
+    const itemsTable = `
+      <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+        <thead>
+          <tr>
+            <th style="padding:8px;border-bottom:2px solid #222;text-align:left;">Item</th>
+            <th style="padding:8px;border-bottom:2px solid #222;text-align:center;">Qty</th>
+            <th style="padding:8px;border-bottom:2px solid #222;text-align:right;">Price</th>
+          </tr>
+        </thead>
+        <tbody>${itemRows}</tbody>
+      </table>
+    `;
+    const fromAddress = process.env.EMAIL_FROM || process.env.EMAIL_USER;
+    const adminEmail = process.env.EMAIL_ADMIN || process.env.EMAIL_USER;
+    const customerMessage = `
+      <p>Hello ${safeCustomerName},</p>
+      <p>Your MXERA order <strong>#${orderId}</strong> has been placed successfully.</p>
+      ${itemsTable}
+      <p><strong>Total:</strong> ${formatOrderAmount(totalAmount)}</p>
+      <p><strong>Payment Method:</strong> ${safePaymentMethod}</p>
+      <p><strong>Delivery address:</strong><br>${safeAddress}</p>
+      <p>Thank you,<br>MXERA Team</p>
+    `;
+    const adminMessage = `
+      <p>New MXERA order <strong>#${orderId}</strong> was placed.</p>
+      <p>
+        <strong>Customer:</strong> ${safeCustomerName}<br>
+        <strong>Email:</strong> ${safeCustomerEmail}<br>
+        <strong>Phone:</strong> ${safeCustomerPhone}<br>
+        <strong>Payment:</strong> ${safePaymentMethod}
+      </p>
+      ${itemsTable}
+      <p><strong>Total:</strong> ${formatOrderAmount(totalAmount)}</p>
+      <p><strong>Delivery address:</strong><br>${safeAddress}</p>
+    `;
+
+    const notificationTasks = [
+      transporter.sendMail({
+        from: fromAddress,
+        to: customerEmail,
+        subject: `MXERA Order Confirmation #${orderId}`,
+        html: customerMessage
+      })
+    ];
+
+    if (adminEmail) {
+      notificationTasks.push(transporter.sendMail({
+        from: fromAddress,
+        to: adminEmail,
+        replyTo: customerEmail,
+        subject: `New MXERA Order #${orderId}`,
+        html: adminMessage
+      }));
+    }
+
+    const notificationResults = await Promise.allSettled(notificationTasks);
+    const notificationFailures = notificationResults.filter(result => result.status === 'rejected');
+    if (!adminEmail) {
+      console.error(`Order #${orderId} admin notification skipped: EMAIL_ADMIN or EMAIL_USER is required.`);
+    }
+    notificationFailures.forEach(result => {
+      console.error(`Order #${orderId} notification email error:`, result.reason?.message || result.reason);
+    });
+
+    res.json({
+      message: 'Order placed successfully',
+      orderId,
+      notificationWarning: notificationFailures.length || !adminEmail
+        ? 'Order placed, but one or more notification emails could not be sent.'
+        : undefined
+    });
   } catch (error) {
-    await connection.rollback();
-    if (orderKey && error.code === 'ER_DUP_ENTRY') {
-      const [existingOrders] = await connection.query(
-        'SELECT id FROM orders WHERE idempotency_key = ? LIMIT 1',
-        [orderKey]
-      );
-      if (existingOrders.length > 0) {
+    console.error('Order placement error:', error.message);
+    if (orderKey && error.message && error.message.includes('E11000')) {
+      const existingOrder = await Order.findOne({ idempotency_key: orderKey });
+      if (existingOrder) {
         return res.json({
           message: 'Order already placed',
-          orderId: existingOrders[0].id,
+          orderId: existingOrder._id,
           duplicate: true
         });
       }
     }
-    console.error('Order placement error:', error.message);
-    return res.status(500).json({ error: 'Unable to place order. Please try again later.' });
+    res.status(500).json({ error: 'Unable to place order. Please try again later.' });
+  } finally {
+    mongoSession.endSession();
   }
-
-  const safeCustomerName = escapeHtml(customerName);
-  const safeCustomerPhone = escapeHtml(customerPhone);
-  const safeCustomerEmail = escapeHtml(customerEmail);
-  const safeAddress = escapeHtml(address);
-  const safePaymentMethod = escapeHtml(paymentMethod || 'cod');
-  const itemRows = renderOrderItemsEmail(orderItems);
-  const itemsTable = `
-    <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-      <thead>
-        <tr>
-          <th style="padding:8px;border-bottom:2px solid #222;text-align:left;">Item</th>
-          <th style="padding:8px;border-bottom:2px solid #222;text-align:center;">Qty</th>
-          <th style="padding:8px;border-bottom:2px solid #222;text-align:right;">Price</th>
-        </tr>
-      </thead>
-      <tbody>${itemRows}</tbody>
-    </table>
-  `;
-  const fromAddress = process.env.EMAIL_FROM || process.env.EMAIL_USER;
-  const adminEmail = process.env.EMAIL_ADMIN || process.env.EMAIL_USER;
-  const customerMessage = `
-    <p>Hello ${safeCustomerName},</p>
-    <p>Your MXERA order <strong>#${orderId}</strong> has been placed successfully.</p>
-    ${itemsTable}
-    <p><strong>Total:</strong> ${formatOrderAmount(totalAmount)}</p>
-    <p><strong>Payment Method:</strong> ${safePaymentMethod}</p>
-    <p><strong>Delivery address:</strong><br>${safeAddress}</p>
-    <p>Thank you,<br>MXERA Team</p>
-  `;
-  const adminMessage = `
-    <p>New MXERA order <strong>#${orderId}</strong> was placed.</p>
-    <p>
-      <strong>Customer:</strong> ${safeCustomerName}<br>
-      <strong>Email:</strong> ${safeCustomerEmail}<br>
-      <strong>Phone:</strong> ${safeCustomerPhone}<br>
-      <strong>Payment:</strong> ${safePaymentMethod}
-    </p>
-    ${itemsTable}
-    <p><strong>Total:</strong> ${formatOrderAmount(totalAmount)}</p>
-    <p><strong>Delivery address:</strong><br>${safeAddress}</p>
-  `;
-
-  const notificationTasks = [
-    transporter.sendMail({
-      from: fromAddress,
-      to: customerEmail,
-      subject: `MXERA Order Confirmation #${orderId}`,
-      html: customerMessage
-    })
-  ];
-
-  if (adminEmail) {
-    notificationTasks.push(transporter.sendMail({
-      from: fromAddress,
-      to: adminEmail,
-      replyTo: customerEmail,
-      subject: `New MXERA Order #${orderId}`,
-      html: adminMessage
-    }));
-  }
-
-  const notificationResults = await Promise.allSettled(notificationTasks);
-  const notificationFailures = notificationResults.filter(result => result.status === 'rejected');
-  if (!adminEmail) {
-    console.error(`Order #${orderId} admin notification skipped: EMAIL_ADMIN or EMAIL_USER is required.`);
-  }
-  notificationFailures.forEach(result => {
-    console.error(`Order #${orderId} notification email error:`, result.reason?.message || result.reason);
-  });
-
-  res.json({
-    message: 'Order placed successfully',
-    orderId,
-    notificationWarning: notificationFailures.length || !adminEmail
-      ? 'Order placed, but one or more notification emails could not be sent.'
-      : undefined
-  });
 });
 
 // Get Orders
-app.get('/api/orders', authenticateToken, (req, res) => {
-  db.query(`
-    SELECT o.id, o.total_amount, o.status, o.created_at,
-    JSON_ARRAYAGG(JSON_OBJECT(
-      'product_name', COALESCE(oi.product_name, p.name, CONCAT('Product #', oi.product_id)),
-      'quantity', oi.quantity,
-      'price', oi.price,
-      'product_color', oi.product_color,
-      'product_color_image', oi.product_color_image,
-      'product_size', oi.product_size
-    )) as items
-    FROM orders o
-    LEFT JOIN order_items oi ON o.id = oi.order_id
-    LEFT JOIN products p ON oi.product_id = p.id
-    WHERE o.user_id = ?
-    GROUP BY o.id
-    ORDER BY o.created_at DESC
-  `, [req.user.id], (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
-  });
+app.get('/api/orders', authenticateToken, async (req, res) => {
+  try {
+    const orders = await Order.aggregate([
+      { $match: { user_id: new mongoose.Types.ObjectId(req.user.id) } },
+      {
+        $lookup: {
+          from: 'orderitems',
+          localField: '_id',
+          foreignField: 'order_id',
+          as: 'items'
+        }
+      },
+      { $sort: { created_at: -1 } }
+    ]);
+
+    // Enrich items with product names
+    const enrichedOrders = await Promise.all(orders.map(async (order) => {
+      const enrichedItems = await Promise.all(order.items.map(async (item) => {
+        let productName = item.product_name;
+        if (!productName) {
+          const product = await Product.findById(item.product_id).select('name');
+          productName = product ? product.name : `Product #${item.product_id}`;
+        }
+        return {
+          product_name: productName,
+          quantity: item.quantity,
+          price: item.price,
+          product_color: item.product_color || '',
+          product_color_image: item.product_color_image || '',
+          product_size: item.product_size || ''
+        };
+      }));
+      return {
+        id: order._id,
+        total_amount: order.total_amount,
+        status: order.status,
+        created_at: order.created_at,
+        items: enrichedItems
+      };
+    }));
+
+    res.json(enrichedOrders);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Health Check
@@ -1690,7 +1479,6 @@ app.get('/api/health', (req, res) => {
 app.post('/api/submit-query', async (req, res) => {
   const { name, email, message } = req.body;
 
-  // Log incoming request details to help debug modal submissions
   console.log('[/api/submit-query] Incoming request from', req.ip || req.connection.remoteAddress);
   console.log('[/api/submit-query] Headers:', {
     origin: req.headers.origin,
@@ -1735,10 +1523,18 @@ app.post('/api/submit-query', async (req, res) => {
 });
 
 // Initialize and Start Server
-initDatabase();
-
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, async () => {
   console.log(`MXERA Server running on http://localhost:${PORT}`);
+
+  // Wait for MongoDB connection before initializing
+  mongoose.connection.once('connected', async () => {
+    await initDatabase();
+  });
+
+  // Also try if already connected
+  if (mongoose.connection.readyState === 1) {
+    await initDatabase();
+  }
 });
 
 server.on('error', (err) => {
