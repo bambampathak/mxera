@@ -12,11 +12,12 @@ let adminToken = localStorage.getItem(tokenKey) || '';
 let adminProducts = [];
 let adminOrders = [];
 let adminSavedAddresses = [];
+let adminInvoices = [];
 
 const money = value => `INR ${Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 const text = value => String(value == null ? '' : value);
 const escaped = value => text(value).replace(/[&<>"']/g, function(ch) {
-  var amp = '&', lt = '<', gt = '>', quot = '"';
+  var amp = '&amp;', lt = '<', gt = '>', quot = '"';
   var apos = '&#' + '39;';
   if (ch === '&') return amp;
   if (ch === '<') return lt;
@@ -70,7 +71,8 @@ function renderMetrics(summary) {
     ['Gross Sales', money(summary.gross_sales)],
     ['Paid Sales', money(summary.paid_sales)],
     ['Customers', summary.customer_count],
-    ['Saved Addresses', summary.saved_addresses_count]
+    ['Saved Addresses', summary.saved_addresses_count],
+    ['Invoices', summary.invoice_count]
   ];
   metricsRoot.innerHTML = metrics.map(([label, value]) => `
     <article class="metric"><span>${escaped(label)}</span><strong>${escaped(value)}</strong></article>
@@ -455,20 +457,23 @@ function fillProductForm(product) {
 
 async function loadDashboard() {
   try {
-    const [summary, products, orders, savedAddresses] = await Promise.all([
+    const [summary, products, orders, savedAddresses, invoices] = await Promise.all([
       request(`${ADMIN_API}/summary`),
       request(`${ADMIN_API}/products`),
       request(`${ADMIN_API}/orders`),
-      request(`${ADMIN_API}/saved-addresses`)
+      request(`${ADMIN_API}/saved-addresses`),
+      request(`${ADMIN_API}/invoices`)
     ]);
     adminProducts = products;
     adminOrders = orders;
     adminSavedAddresses = savedAddresses;
+    adminInvoices = invoices;
     showAdmin();
     renderMetrics(summary);
     renderProducts();
     renderOrders();
     renderSavedAddresses();
+    renderInvoices();
   } catch (error) {
     if (/access|admin/i.test(error.message)) {
       adminToken = '';
@@ -590,6 +595,78 @@ document.getElementById('admin-logout-btn').addEventListener('click', () => {
   localStorage.removeItem(tokenKey);
   showLogin('');
 });
+
+// ═══════════════════════════════════════════════
+//  Invoices
+// ═══════════════════════════════════════════════
+
+function renderInvoices() {
+  const query = document.getElementById('invoice-filter').value.trim().toLowerCase();
+  const invoices = query
+    ? adminInvoices.filter(inv =>
+        `${inv.invoice_number} ${inv.customer_name || ''} ${inv.order_id || ''}`.toLowerCase().includes(query)
+      )
+    : adminInvoices;
+  const body = document.getElementById('admin-invoices-body');
+  body.innerHTML = invoices.map(inv => {
+    const invDate = inv.invoice_date ? new Date(inv.invoice_date).toLocaleDateString('en-IN') : '—';
+    const paymentPillClass = inv.payment_status === 'paid' ? 'pill-ok' : inv.payment_status === 'pending' ? '' : 'pill-danger';
+    const statusPillClass = inv.order_status === 'delivered' ? 'pill-ok' : inv.order_status === 'cancelled' ? 'pill-danger' : '';
+    return `
+      <tr>
+        <td>
+          <div class="invoice-cell">
+            <strong>${escaped(inv.invoice_number)}</strong>
+            <small>${escaped(inv._id)}</small>
+          </div>
+        </td>
+        <td>${escaped(inv.customer_name || '—')}</td>
+        <td>${escaped(inv.order_id || '—')}</td>
+        <td>${money(inv.total_amount)}</td>
+        <td><span class="pill ${paymentPillClass}">${escaped(inv.payment_status)}</span></td>
+        <td><span class="pill ${statusPillClass}">${escaped(inv.order_status)}</span></td>
+        <td class="subtle">${invDate}</td>
+        <td>
+          <div class="invoice-actions">
+            <button type="button" data-view-invoice="${inv._id}">View</button>
+            <button type="button" class="danger" data-delete-invoice="${inv._id}">Delete</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('') || '<tr><td colspan="8">No invoices found.</td></tr>';
+}
+
+// Handle invoice actions (view, delete) via event delegation
+document.getElementById('admin-invoices-body').addEventListener('click', async event => {
+  const viewId = event.target.dataset.viewInvoice;
+  const deleteId = event.target.dataset.deleteInvoice;
+
+  if (viewId) {
+    try {
+      const invoice = await request(`${ADMIN_API}/invoices/${viewId}`);
+      toast(`Invoice ${invoice.invoice_number}: ${money(invoice.grand_total || invoice.total_amount)} — ${invoice.payment_status}`);
+      // Open printable version in new tab
+      window.open(`/api/admin/invoices/${viewId}/print`, '_blank');
+    } catch (error) {
+      toast(`Error: ${error.message}`);
+    }
+    return;
+  }
+
+  if (deleteId && confirm('Delete this invoice? This cannot be undone.')) {
+    try {
+      await request(`${ADMIN_API}/invoices/${deleteId}`, { method: 'DELETE' });
+      toast('Invoice deleted.');
+      adminInvoices = adminInvoices.filter(inv => inv._id !== deleteId);
+      renderInvoices();
+    } catch (error) {
+      toast(error.message);
+    }
+  }
+});
+
+document.getElementById('invoice-filter').addEventListener('input', renderInvoices);
 
 fillProductForm();
 if (adminToken) {

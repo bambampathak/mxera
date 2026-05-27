@@ -486,6 +486,41 @@ tr:last-child td{border-bottom:0}
   max-width:1200px;
 }
 
+/* ── Invoices Panel ── */
+
+.invoices-panel{
+  max-width:1200px;
+}
+
+.invoice-cell{
+  display:grid;
+  gap:3px;
+  min-width:160px;
+}
+
+.invoice-cell strong{
+  font-size:14px;
+  color:var(--gold);
+  font-family:monospace;
+}
+
+.invoice-cell small{
+  color:var(--muted);
+  font-size:12px;
+}
+
+.invoice-actions{
+  display:flex;
+  gap:6px;
+  flex-wrap:nowrap;
+}
+
+.invoice-actions button{
+  padding:6px 9px;
+  font-size:12px;
+  white-space:nowrap;
+}
+
 /* ── Toast ── */
 
 .admin-toast{
@@ -525,3 +560,45 @@ tr:last-child td{border-bottom:0}
   .color-image-group{flex:1 1 100%}
   .color-image-inputs{flex-wrap:wrap}
 }
+
+@media(max-width:480px){
+  .admin-login form{
+    padding:20px 16px;
+  }
+  .admin-tabs{
+    gap:4px;
+  }
+  .admin-tabs button{
+    padding:8px 10px;
+    font-size:12px;
+  }
+  .table-scroll table{
+    font-size:12px;
+  }
+  .table-scroll th,
+  .table-scroll td{
+    padding:8px 6px;
+  }
+  main{
+    padding-left:10px;
+    padding-right:10px;
+  }
+  .admin-brand strong{
+    font-size:18px;
+  }
+  .admin-brand span{
+    font-size:13px;
+  }
+  .admin-header-actions a,
+  .admin-header-actions button{
+    padding:6px 8px;
+    font-size:12px;
+  }
+  .product-form{
+    padding:16px;
+  }
+  .color-image-inputs{
+    flex-direction:column;
+  }
+}
+

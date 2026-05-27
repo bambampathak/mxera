@@ -45,6 +45,7 @@
       <nav class="admin-tabs" aria-label="Admin views">
         <button class="admin-tab active" type="button" data-view="products">Products</button>
         <button class="admin-tab" type="button" data-view="orders">Orders</button>
+        <button class="admin-tab" type="button" data-view="invoices">Invoices</button>
         <button class="admin-tab" type="button" data-view="users">Users</button>
       </nav>
 
@@ -193,6 +194,34 @@
                 </tr>
               </thead>
               <tbody id="admin-orders-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section class="admin-view" id="invoices-view">
+        <section class="table-panel invoices-panel">
+          <div class="panel-head">
+            <h2>Invoices</h2>
+            <div class="panel-head-actions">
+              <input id="invoice-filter" type="search" placeholder="Filter invoice, customer, order">
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Invoice #</th>
+                  <th>Customer</th>
+                  <th>Order</th>
+                  <th>Total</th>
+                  <th>Payment</th>
+                  <th>Status</th>
+                  <th>Date</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="admin-invoices-body"></tbody>
             </table>
           </div>
         </section>

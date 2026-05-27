@@ -1176,7 +1176,7 @@ async function requestSignupOtp() {
   try {
     const response = await fetch(`${API_URL}/request-otp`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: buildHeaders(),
       body: JSON.stringify({ name, email, phone, method: 'email' })
     });
     const data = await response.json();
@@ -1214,7 +1214,7 @@ async function verifyOtpAndRegister() {
   try {
     const verifyResponse = await fetch(`${API_URL}/verify-otp`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: buildHeaders(),
       body: JSON.stringify({ email, otp })
     });
     const verifyData = await verifyResponse.json();

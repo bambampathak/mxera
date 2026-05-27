@@ -17,7 +17,7 @@ const savedAddressSchema = new mongoose.Schema({
   is_default: { type: Number, default: 0 }
 }, { timestamps: { createdAt: 'created_at', updatedAt: false } });
 
-// Compound index for deduplication
-savedAddressSchema.index({ user_id: 1, address: 1, city: 1, pincode: 1 }, { unique: true, partialFilterExpression: { address: { $ne: '' }, city: { $ne: '' }, pincode: { $ne: '' } } });
+// Compound index for deduplication (prevents same address from being saved multiple times)
+savedAddressSchema.index({ user_id: 1, address: 1, house_no: 1, city: 1, pincode: 1 }, { unique: true, partialFilterExpression: { city: { $ne: '' }, pincode: { $ne: '' } } });
 
 module.exports = mongoose.model('SavedAddress', savedAddressSchema);

@@ -21,6 +21,7 @@ const Order = require('./models/Order');
 const OrderItem = require('./models/OrderItem');
 const PasswordReset = require('./models/PasswordReset');
 const SavedAddress = require('./models/SavedAddress');
+const Invoice = require('./models/Invoice');
 
 // Multer configuration for file uploads
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -156,8 +157,14 @@ const isValidObjectId = (id) => {
   }
 };
 
+// Safely extract user ID from request — return null if not a valid ObjectId
+const getUserId = (req) => {
+  const id = req.user?.id || null;
+  return id && isValidObjectId(id) ? id : null;
+};
+
 const escapeHtml = (value = '') => String(value)
-  .replace(/&/g, '&')
+  .replace(/&/g, '&amp;')
   .replace(/</g, '<')
   .replace(/>/g, '>')
   .replace(/"/g, '"')
@@ -412,12 +419,13 @@ app.get('/api/admin/summary', requireAdmin, async (req, res) => {
 
     let customerCount;
     if (ADMIN_EMAILS.length) {
-      customerCount = await User.countDocuments({ email: { $nin: ADMIN_EMAILS.map(e => new RegExp(`^${e.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i')) } });
+      customerCount = await User.countDocuments({ email: { $nin: ADMIN_EMAILS.map(e => new RegExp(`^${e.replace(/[.*+?^${}()|[\]\\]/g, '\$&')}$`, 'i')) } });
     } else {
       customerCount = await User.countDocuments();
     }
 
     const savedAddressesCount = await SavedAddress.countDocuments();
+    const invoiceCount = await Invoice.countDocuments();
 
     res.json({
       product_count: productCount,
@@ -428,7 +436,8 @@ app.get('/api/admin/summary', requireAdmin, async (req, res) => {
       gross_sales: grossSales,
       paid_sales: paidSales,
       customer_count: customerCount,
-      saved_addresses_count: savedAddressesCount
+      saved_addresses_count: savedAddressesCount,
+      invoice_count: invoiceCount
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -565,9 +574,10 @@ app.get('/api/admin/orders', requireAdmin, async (req, res) => {
 // Delete all orders (admin only)
 app.delete('/api/admin/orders', requireAdmin, async (req, res) => {
   try {
+    await Invoice.deleteMany({});
     await OrderItem.deleteMany({});
     await Order.deleteMany({});
-    res.json({ message: 'All orders have been deleted.' });
+    res.json({ message: 'All orders and associated invoices have been deleted.' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -612,6 +622,94 @@ app.patch('/api/admin/orders/:id', requireAdmin, async (req, res) => {
     res.json(updated);
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// POS (Point of Sale) - Create order directly (admin only, bypasses cart)
+app.post('/api/admin/pos/order', requireAdmin, async (req, res) => {
+  const { items, customerName, customerPhone, customerEmail, paymentMethod, deliveryAddress } = req.body;
+
+  if (!items || items.length === 0) {
+    return res.status(400).json({ error: 'No items in POS order' });
+  }
+  if (!customerName || !customerPhone) {
+    return res.status(400).json({ error: 'Customer name and phone are required for POS orders' });
+  }
+
+  const orderItems = items.map(item => ({
+    product_id: item.product_id,
+    quantity: Number(item.quantity),
+    price: Number(item.price),
+    name: item.name || ''
+  }));
+
+  if (orderItems.some(item => !item.product_id || !Number.isFinite(item.quantity) || item.quantity <= 0 || !Number.isFinite(item.price) || item.price < 0)) {
+    return res.status(400).json({ error: 'Order contains invalid items' });
+  }
+
+  const totalAmount = orderItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+
+  const mongoSession = await mongoose.startSession();
+  let orderId;
+
+  try {
+    await mongoSession.withTransaction(async () => {
+      const order = await Order.create([{
+        user_id: null, // POS orders are not linked to a user account
+        customer_name: customerName,
+        customer_email: customerEmail || '',
+        customer_phone: customerPhone,
+        payment_method: paymentMethod || 'cash',
+        payment_status: 'paid', // POS is paid at counter
+        total_amount: totalAmount,
+        status: 'processing', // POS orders are in-store, start as processing
+        delivery_address: deliveryAddress || 'In-store pickup'
+      }], { session: mongoSession });
+      orderId = order[0]._id;
+
+      for (const item of orderItems) {
+        const product = await Product.findById(item.product_id).session(mongoSession);
+        if (!product || product.stock < item.quantity) {
+          throw new Error(`Insufficient stock for product ${item.product_id}`);
+        }
+        const stockResult = await Product.updateOne(
+          { _id: item.product_id, stock: { $gte: item.quantity } },
+          { $inc: { stock: -item.quantity } },
+          { session: mongoSession }
+        );
+        if (stockResult.modifiedCount === 0) {
+          throw new Error(`Insufficient stock for product ${item.product_id} (race condition)`);
+        }
+
+        await OrderItem.create([{
+          order_id: orderId,
+          product_id: item.product_id,
+          product_name: item.name || `Product #${item.product_id}`,
+          quantity: item.quantity,
+          price: item.price,
+          product_color: item.product_color || '',
+          product_color_image: item.product_color_image || '',
+          product_size: item.product_size || ''
+        }], { session: mongoSession });
+      }
+    });
+
+    // Generate invoice for POS order (non-blocking)
+    try { await generateInvoiceForOrder(orderId); }
+    catch (invoiceErr) { console.error('POS invoice generation failed:', invoiceErr.message); }
+
+    res.json({
+      message: 'POS order placed successfully',
+      orderId,
+      total_amount: totalAmount,
+      customer_name: customerName,
+      customer_phone: customerPhone
+    });
+  } catch (error) {
+    console.error('POS order error:', error.message);
+    res.status(500).json({ error: error.message });
+  } finally {
+    mongoSession.endSession();
   }
 });
 
@@ -697,13 +795,19 @@ app.post('/api/saved-addresses', authenticateToken, async (req, res) => {
       await SavedAddress.updateMany({ user_id: req.user.id }, { is_default: 0 });
     }
 
-    // Check for duplicate
-    const existing = await SavedAddress.findOne({
+    // Check for duplicate using all address fields
+    const duplicateQuery = {
       user_id: req.user.id,
-      address: address || '',
       city: city,
       pincode: pincode
-    });
+    };
+    if (address) duplicateQuery.address = address;
+    if (house_no) duplicateQuery.house_no = house_no;
+    if (street) duplicateQuery.street = street;
+    if (locality) duplicateQuery.locality = locality;
+    if (landmark) duplicateQuery.landmark = landmark;
+
+    const existing = await SavedAddress.findOne(duplicateQuery);
 
     if (existing) {
       // Update existing record with new fields
@@ -746,9 +850,12 @@ app.post('/api/saved-addresses', authenticateToken, async (req, res) => {
       // Duplicate key error — compound index violation, return existing
       const existing = await SavedAddress.findOne({
         user_id: req.user.id,
-        address: address || '',
         city: city,
-        pincode: pincode
+        pincode: pincode,
+        $or: [
+          { address: address || '' },
+          { house_no: house_no || '' }
+        ]
       });
       if (existing) return res.json(existing);
     }
@@ -961,7 +1068,7 @@ app.post('/api/login', async (req, res) => {
 // Get User Profile
 app.get('/api/user', authenticateToken, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select('id name email phone address');
+    const user = await User.findById(req.user.id).select('id name email phone address gender');
     res.json(user);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -970,9 +1077,14 @@ app.get('/api/user', authenticateToken, async (req, res) => {
 
 // Update User Profile
 app.put('/api/user', authenticateToken, async (req, res) => {
-  const { name, phone, address } = req.body;
+  const { name, phone, address, gender } = req.body;
   try {
-    await User.updateOne({ _id: req.user.id }, { name, phone, address });
+    const updates = {};
+    if (name !== undefined) updates.name = name;
+    if (phone !== undefined) updates.phone = phone;
+    if (address !== undefined) updates.address = address;
+    if (gender !== undefined) updates.gender = gender;
+    await User.updateOne({ _id: req.user.id }, updates);
     res.json({ message: 'Profile updated successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -982,7 +1094,7 @@ app.put('/api/user', authenticateToken, async (req, res) => {
 // Get Cart
 app.get('/api/cart', optionalAuth, async (req, res) => {
   const sessionId = req.headers['x-session-id'] || req.sessionID;
-  const userId = req.user?.id || null;
+  const userId = getUserId(req);
 
   try {
     let cartItems;
@@ -1021,7 +1133,7 @@ app.get('/api/cart', optionalAuth, async (req, res) => {
 app.post('/api/cart', optionalAuth, async (req, res) => {
   const { productId, quantity = 1, colorName = '', colorImage = '', sizeName = '' } = req.body;
   const sessionId = req.headers['x-session-id'] || req.sessionID;
-  const userId = req.user?.id || null;
+  const userId = getUserId(req);
 
   try {
     if (!isValidObjectId(productId)) return res.status(400).json({ error: 'Invalid product id' });
@@ -1032,10 +1144,7 @@ app.post('/api/cart', optionalAuth, async (req, res) => {
     let existing;
     if (userId) {
       existing = await Cart.findOne({
-        $or: [
-          { session_id: sessionId, user_id: userId },
-          { user_id: userId }
-        ],
+        user_id: userId,
         product_id: productId,
         product_color: colorName,
         product_size: sizeName
@@ -1074,7 +1183,7 @@ app.post('/api/cart', optionalAuth, async (req, res) => {
 app.put('/api/cart/:id', optionalAuth, async (req, res) => {
   const { quantity } = req.body;
   const sessionId = req.headers['x-session-id'] || req.sessionID;
-  const userId = req.user?.id || null;
+  const userId = getUserId(req);
 
   try {
     if (quantity <= 0) {
@@ -1107,7 +1216,7 @@ app.put('/api/cart/:id', optionalAuth, async (req, res) => {
 // Remove from Cart
 app.delete('/api/cart/:id', optionalAuth, async (req, res) => {
   const sessionId = req.headers['x-session-id'] || req.sessionID;
-  const userId = req.user?.id || null;
+  const userId = getUserId(req);
 
   try {
     await Cart.findOneAndDelete({
@@ -1126,7 +1235,7 @@ app.delete('/api/cart/:id', optionalAuth, async (req, res) => {
 // Clear Cart
 app.delete('/api/cart', optionalAuth, async (req, res) => {
   const sessionId = req.headers['x-session-id'] || req.sessionID;
-  const userId = req.user?.id || null;
+  const userId = getUserId(req);
 
   try {
     await Cart.deleteMany({
@@ -1144,7 +1253,7 @@ app.delete('/api/cart', optionalAuth, async (req, res) => {
 // Get Wishlist
 app.get('/api/wishlist', optionalAuth, async (req, res) => {
   const sessionId = req.headers['x-session-id'] || req.sessionID;
-  const userId = req.user?.id || null;
+  const userId = getUserId(req);
 
   try {
     let wishlistItems;
@@ -1180,7 +1289,7 @@ app.get('/api/wishlist', optionalAuth, async (req, res) => {
 app.post('/api/wishlist', optionalAuth, async (req, res) => {
   const { productId } = req.body;
   const sessionId = req.headers['x-session-id'] || req.sessionID;
-  const userId = req.user?.id || null;
+  const userId = getUserId(req);
 
   try {
     if (!isValidObjectId(productId)) return res.status(400).json({ error: 'Invalid product id' });
@@ -1226,7 +1335,7 @@ app.post('/api/wishlist', optionalAuth, async (req, res) => {
 // Remove from Wishlist
 app.delete('/api/wishlist/:productId', optionalAuth, async (req, res) => {
   const sessionId = req.headers['x-session-id'] || req.sessionID;
-  const userId = req.user?.id || null;
+  const userId = getUserId(req);
 
   try {
     if (!isValidObjectId(req.params.productId)) return res.status(400).json({ error: 'Invalid product id' });
@@ -1310,7 +1419,7 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
       }
 
       const order = await Order.create([{
-        user_id: req.user?.id || null,
+        user_id: getUserId(req),
         idempotency_key: orderKey,
         customer_name: customerName,
         customer_email: customerEmail,
@@ -1328,11 +1437,14 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
         if (!product || product.stock < item.quantity) {
           throw new Error(`Insufficient stock for product ${item.product_id}`);
         }
-        await Product.updateOne(
+        const stockResult = await Product.updateOne(
           { _id: item.product_id, stock: { $gte: item.quantity } },
           { $inc: { stock: -item.quantity } },
           { session: mongoSession }
         );
+        if (stockResult.modifiedCount === 0) {
+          throw new Error(`Insufficient stock for product ${item.product_id} (race condition)`);
+        }
 
         await OrderItem.create([{
           order_id: orderId,
@@ -1350,29 +1462,41 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
       await Cart.deleteMany({
         $or: [
           { session_id: sessionId },
-          { user_id: req.user?.id || null }
+          { user_id: getUserId(req) }
         ]
       }).session(mongoSession);
 
-      // Auto-save delivery address
+      // Auto-save delivery address (skip if duplicate already exists)
       if (req.user?.id && address) {
         const savedAddress = streetAddress || address;
         try {
-          await SavedAddress.create([{
+          const existingAddr = await SavedAddress.findOne({
             user_id: req.user.id,
-            label: 'Order Address',
-            customer_name: customerName || '',
-            customer_email: customerEmail || '',
-            address: savedAddress,
-            house_no: house_no || '',
-            street: street || '',
-            locality: locality || '',
             city: city || '',
-            state: state || '',
             pincode: pincode || '',
-            landmark: landmark || '',
-            phone: customerPhone || ''
-          }], { session: mongoSession });
+            $or: [
+              { address: savedAddress },
+              { house_no: house_no || '' }
+            ]
+          }).session(mongoSession);
+
+          if (!existingAddr) {
+            await SavedAddress.create([{
+              user_id: req.user.id,
+              label: 'Order Address',
+              customer_name: customerName || '',
+              customer_email: customerEmail || '',
+              address: savedAddress,
+              house_no: house_no || '',
+              street: street || '',
+              locality: locality || '',
+              city: city || '',
+              state: state || '',
+              pincode: pincode || '',
+              landmark: landmark || '',
+              phone: customerPhone || ''
+            }], { session: mongoSession });
+          }
         } catch (dupErr) {
           // Silently fail on duplicate address
         }
@@ -1454,6 +1578,13 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
       console.error(`Order #${orderId} notification email error:`, result.reason?.message || result.reason);
     });
 
+    // Auto-generate invoice for the order (non-blocking — don't fail order on invoice error)
+    try {
+      await generateInvoiceForOrder(orderId);
+    } catch (invoiceErr) {
+      console.error(`Invoice generation error for order #${orderId}:`, invoiceErr.message);
+    }
+
     res.json({
       message: 'Order placed successfully',
       orderId,
@@ -1526,6 +1657,499 @@ app.get('/api/orders', authenticateToken, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// ================= INVOICE SYSTEM =================
+
+// Helper to generate a sequential invoice number
+async function generateInvoiceNumber() {
+  const prefix = 'INV-' + new Date().getFullYear() + '-';
+  // Find the highest invoice number for this year
+  const lastInvoice = await Invoice.findOne({
+    invoice_number: { $regex: '^' + prefix.replace(/-/g, '\\-') }
+  }).sort({ invoice_number: -1 });
+
+  let nextNum = 1;
+  if (lastInvoice) {
+    const parts = lastInvoice.invoice_number.split('-');
+    const lastNum = parseInt(parts[parts.length - 1], 10);
+    if (!isNaN(lastNum)) nextNum = lastNum + 1;
+  }
+  return prefix + String(nextNum).padStart(5, '0');
+}
+
+// Helper to generate invoice for an order (used internally & by admin)
+async function generateInvoiceForOrder(orderId) {
+  const order = await Order.findById(orderId);
+  if (!order) throw new Error('Order not found');
+
+  const orderItems = await OrderItem.find({ order_id: orderId });
+
+  // Check if invoice already exists
+  const existing = await Invoice.findOne({ order_id: orderId });
+  if (existing) return existing;
+
+  const subtotal = orderItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  const taxPercentage = 0; // No tax by default — can be updated via admin
+  const taxAmount = subtotal * (taxPercentage / 100);
+  const grandTotal = subtotal + taxAmount;
+
+  const invoiceNumber = await generateInvoiceNumber();
+
+  const invoice = await Invoice.create({
+    invoice_number: invoiceNumber,
+    order_id: orderId,
+    user_id: order.user_id,
+    customer_name: order.customer_name,
+    customer_email: order.customer_email,
+    customer_phone: order.customer_phone,
+    delivery_address: order.delivery_address,
+    payment_method: order.payment_method,
+    payment_status: order.payment_status,
+    order_status: order.status,
+    total_amount: order.total_amount,
+    invoice_date: new Date(),
+    due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    items: orderItems.map(item => ({
+      product_name: item.product_name || `Product #${item.product_id}`,
+      quantity: item.quantity,
+      price: item.price,
+      product_color: item.product_color || '',
+      product_size: item.product_size || ''
+    })),
+    subtotal,
+    tax_percentage: taxPercentage,
+    tax_amount: taxAmount,
+    grand_total: grandTotal
+  });
+
+  return invoice;
+}
+
+// Auto-generate invoice after order creation (add to order success path)
+// This hook is called from the order creation endpoint below
+
+// User: Get all invoices for the logged-in user
+app.get('/api/invoices', authenticateToken, async (req, res) => {
+  try {
+    const invoices = await Invoice.find({ user_id: req.user.id })
+      .select('invoice_number order_id total_amount payment_status order_status invoice_date created_at')
+      .sort({ invoice_date: -1 });
+    res.json(invoices);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// User: Get single invoice details
+app.get('/api/invoices/:id', authenticateToken, async (req, res) => {
+  try {
+    if (!isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid invoice id' });
+    const invoice = await Invoice.findOne({ _id: req.params.id, user_id: req.user.id });
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+    res.json(invoice);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// User: Get invoice HTML for printing
+app.get('/api/invoices/:id/print', authenticateToken, async (req, res) => {
+  try {
+    if (!isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid invoice id' });
+    const invoice = await Invoice.findOne({ _id: req.params.id, user_id: req.user.id });
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+
+    res.setHeader('Content-Type', 'text/html');
+    res.send(renderInvoiceHtml(invoice));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Admin: List all invoices
+app.get('/api/admin/invoices', requireAdmin, async (req, res) => {
+  try {
+    const invoices = await Invoice.find()
+      .select('invoice_number order_id customer_name total_amount payment_status order_status invoice_date created_at')
+      .sort({ invoice_date: -1 })
+      .limit(250);
+    res.json(invoices);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Admin: Generate invoice for an order
+app.post('/api/admin/invoices/generate/:orderId', requireAdmin, async (req, res) => {
+  try {
+    if (!isValidObjectId(req.params.orderId)) return res.status(400).json({ error: 'Invalid order id' });
+    const invoice = await generateInvoiceForOrder(req.params.orderId);
+    res.status(201).json(invoice);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Admin: Update invoice (e.g., add tax, notes, company info)
+app.patch('/api/admin/invoices/:id', requireAdmin, async (req, res) => {
+  const allowedFields = ['notes', 'terms', 'tax_percentage', 'company_name', 'company_address', 'company_email', 'company_phone', 'company_gst', 'payment_status', 'order_status'];
+  const update = {};
+  for (const field of allowedFields) {
+    if (req.body[field] !== undefined) {
+      update[field] = req.body[field];
+    }
+  }
+  if (!Object.keys(update).length) {
+    return res.status(400).json({ error: 'No valid invoice fields to update' });
+  }
+
+  // If tax_percentage changed, recalculate tax and grand total
+  if (update.tax_percentage !== undefined) {
+    try {
+      const invoice = await Invoice.findById(req.params.id);
+      if (invoice) {
+        update.tax_amount = invoice.subtotal * (Number(update.tax_percentage) / 100);
+        update.grand_total = invoice.subtotal + update.tax_amount;
+      }
+    } catch (err) {
+      return res.status(500).json({ error: 'Failed to recalculate invoice totals' });
+    }
+  }
+
+  try {
+    const updated = await Invoice.findByIdAndUpdate(req.params.id, update, { new: true });
+    if (!updated) return res.status(404).json({ error: 'Invoice not found' });
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Admin: Get invoice details (full access)
+app.get('/api/admin/invoices/:id', requireAdmin, async (req, res) => {
+  try {
+    if (!isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid invoice id' });
+    const invoice = await Invoice.findById(req.params.id);
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+    res.json(invoice);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Admin: Delete an invoice
+app.delete('/api/admin/invoices/:id', requireAdmin, async (req, res) => {
+  try {
+    if (!isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid invoice id' });
+    const result = await Invoice.findByIdAndDelete(req.params.id);
+    if (!result) return res.status(404).json({ error: 'Invoice not found' });
+    res.json({ message: 'Invoice deleted' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Admin: Print invoice
+app.get('/api/admin/invoices/:id/print', requireAdmin, async (req, res) => {
+  try {
+    if (!isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid invoice id' });
+    const invoice = await Invoice.findById(req.params.id);
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+    res.setHeader('Content-Type', 'text/html');
+    res.send(renderInvoiceHtml(invoice));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Render invoice as printable HTML
+function renderInvoiceHtml(invoice) {
+  const fmt = (val) => '₹' + Number(val || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const dateStr = invoice.invoice_date
+    ? new Date(invoice.invoice_date).toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' })
+    : 'N/A';
+  const dueStr = invoice.due_date
+    ? new Date(invoice.due_date).toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' })
+    : 'N/A';
+
+  const itemsRows = (invoice.items || []).map(item => {
+    const colorSize = [item.product_color, item.product_size].filter(Boolean).join(' / ');
+    const metaHtml = colorSize ? `<br><small style="color:#666;">${escapeHtml(colorSize)}</small>` : '';
+    return `<tr>
+      <td style="padding:10px 12px;border-bottom:1px solid #eee;">${escapeHtml(item.product_name)}${metaHtml}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #eee;text-align:center;">${item.quantity}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #eee;text-align:right;">${fmt(item.price)}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #eee;text-align:right;">${fmt(item.price * item.quantity)}</td>
+    </tr>`;
+  }).join('');
+
+  const statusBadge = (invoice.order_status || '').toLowerCase();
+  const statusColors = {
+    pending: '#ffc107',
+    processing: '#0d6efd',
+    shipped: '#0dcaf0',
+    delivered: '#198754',
+    cancelled: '#dc3545'
+  };
+  const statusColor = statusColors[statusBadge] || '#6c757d';
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Invoice ${escapeHtml(invoice.invoice_number)}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5;
+      color: #222;
+      padding: 40px 20px;
+    }
+    .invoice-wrapper {
+      max-width: 800px;
+      margin: 0 auto;
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+      overflow: hidden;
+    }
+    .invoice-header {
+      background: linear-gradient(135deg, #1a1a2e, #16213e);
+      color: #fff;
+      padding: 36px 40px;
+    }
+    .invoice-header .top-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    .invoice-header .brand {
+      font-size: 28px;
+      font-weight: 900;
+      letter-spacing: 2px;
+    }
+    .invoice-header .brand span {
+      color: #d4af37;
+    }
+    .invoice-header .invoice-title {
+      text-align: right;
+    }
+    .invoice-header .invoice-title h1 {
+      font-size: 24px;
+      font-weight: 700;
+    }
+    .invoice-header .invoice-title p {
+      font-size: 13px;
+      opacity: 0.8;
+      margin-top: 4px;
+    }
+    .invoice-body {
+      padding: 40px;
+    }
+    .invoice-body .status-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+    .invoice-body .status-badge {
+      display: inline-block;
+      padding: 6px 18px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #fff;
+      background: ${statusColor};
+    }
+    .info-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-bottom: 28px;
+    }
+    .info-section h3 {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #888;
+      margin-bottom: 8px;
+    }
+    .info-section p {
+      font-size: 14px;
+      line-height: 1.6;
+      color: #333;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+    }
+    thead th {
+      background: #f8f8f8;
+      padding: 10px 12px;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #666;
+      text-align: left;
+      border-bottom: 2px solid #eee;
+    }
+    thead th:last-child,
+    tbody td:last-child { text-align: right; }
+    tbody td { font-size: 14px; color: #333; }
+    .totals {
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 2px solid #eee;
+    }
+    .totals .total-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 6px 0;
+      font-size: 14px;
+    }
+    .totals .total-row.total {
+      font-size: 18px;
+      font-weight: 800;
+      border-top: 2px solid #333;
+      padding-top: 10px;
+      margin-top: 8px;
+      color: #1a1a2e;
+    }
+    .totals .total-row .label { color: #666; }
+    .totals .total-row .value { font-weight: 600; }
+    .totals .total-row.total .value { color: #d4af37; }
+    .footer-note {
+      margin-top: 28px;
+      padding-top: 20px;
+      border-top: 1px solid #eee;
+      font-size: 13px;
+      color: #888;
+      line-height: 1.6;
+    }
+    .print-btn {
+      display: block;
+      width: 200px;
+      margin: 20px auto 0;
+      padding: 12px 0;
+      background: #1a1a2e;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: inherit;
+      transition: opacity 0.3s;
+    }
+    .print-btn:hover { opacity: 0.85; }
+    @media print {
+      body { background: #fff; padding: 0; }
+      .invoice-wrapper { box-shadow: none; border-radius: 0; }
+      .print-btn { display: none; }
+    }
+    @media (max-width: 600px) {
+      .info-grid { grid-template-columns: 1fr; }
+      .invoice-body { padding: 24px; }
+      .invoice-header { padding: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="invoice-wrapper">
+    <div class="invoice-header">
+      <div class="top-row">
+        <div class="brand">MXERA<span>.</span></div>
+        <div class="invoice-title">
+          <h1>INVOICE</h1>
+          <p>${escapeHtml(invoice.invoice_number)}</p>
+        </div>
+      </div>
+    </div>
+    <div class="invoice-body">
+      <div class="status-row">
+        <div>
+          <div style="font-size:13px;color:#888;">Date: ${dateStr}</div>
+          <div style="font-size:13px;color:#888;">Due: ${dueStr}</div>
+        </div>
+        <span class="status-badge">${escapeHtml(invoice.order_status || 'N/A')}</span>
+      </div>
+
+      <div class="info-grid">
+        <div class="info-section">
+          <h3>Bill To</h3>
+          <p>
+            <strong>${escapeHtml(invoice.customer_name || 'N/A')}</strong><br>
+            ${escapeHtml(invoice.customer_email || '')}<br>
+            ${escapeHtml(invoice.customer_phone || '')}<br>
+            ${escapeHtml(invoice.delivery_address || '')}
+          </p>
+        </div>
+        <div class="info-section">
+          <h3>From</h3>
+          <p>
+            <strong>${escapeHtml(invoice.company_name || 'MXERA')}</strong><br>
+            ${escapeHtml(invoice.company_address || '')}<br>
+            ${escapeHtml(invoice.company_email || '')}<br>
+            ${escapeHtml(invoice.company_phone || '')}
+            ${invoice.company_gst ? '<br>GST: ' + escapeHtml(invoice.company_gst) : ''}
+          </p>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th style="text-align:center;">Qty</th>
+            <th style="text-align:right;">Price</th>
+            <th style="text-align:right;">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${itemsRows}
+        </tbody>
+      </table>
+
+      <div class="totals">
+        <div class="total-row">
+          <span class="label">Subtotal</span>
+          <span class="value">${fmt(invoice.subtotal)}</span>
+        </div>
+        ${invoice.tax_percentage > 0 ? `
+        <div class="total-row">
+          <span class="label">Tax (${invoice.tax_percentage}%)</span>
+          <span class="value">${fmt(invoice.tax_amount)}</span>
+        </div>` : ''}
+        <div class="total-row">
+          <span class="label">Payment</span>
+          <span class="value" style="text-transform:capitalize;">${escapeHtml(invoice.payment_method || 'N/A')}</span>
+        </div>
+        <div class="total-row total">
+          <span class="label">Grand Total</span>
+          <span class="value">${fmt(invoice.grand_total)}</span>
+        </div>
+      </div>
+
+      ${invoice.notes ? `<div class="footer-note"><strong>Notes:</strong><br>${escapeHtml(invoice.notes)}</div>` : ''}
+      <div class="footer-note">${escapeHtml(invoice.terms || 'Thank you for your business.')}</div>
+
+      <button class="print-btn" onclick="window.print()">🖨️ Print / Save PDF</button>
+    </div>
+  </div>
+</body>
+</html>`;
+}
 
 // Health Check
 app.get('/api/health', (req, res) => {

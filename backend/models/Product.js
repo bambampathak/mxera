@@ -17,6 +17,6 @@ const productSchema = new mongoose.Schema({
   specifications: { type: String, default: null },
   colors: { type: String, default: null },
   sizes: { type: String, default: null }
-}, { timestamps: { createdAt: 'created_at', updatedAt: false } });
+}, { timestamps: { createdAt: 'created_at', updatedAt: false }, toJSON: { virtuals: true } });
 
 module.exports = mongoose.model('Product', productSchema);
